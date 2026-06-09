@@ -1,0 +1,5 @@
+# Copy to packages/api/.dev.vars for local `wrangler dev` (gitignored, never deployed).
+#
+# Allows /v1 without a Bearer secret for local testing. In production a missing
+# GRID_API_SECRET fails closed (503), so this only affects local dev.
+GRID_DEV_OPEN=1

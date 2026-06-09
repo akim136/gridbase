@@ -1,0 +1,31 @@
+# Copy this file to packages/api/wrangler.toml and fill in your own D1 database id.
+#
+#   cp wrangler.toml.example packages/api/wrangler.toml
+#
+# Then create a D1 database and paste its id below:
+#   cd packages/api && npx wrangler d1 create gridbase
+#
+# This file is for the @gridbase/api Worker (the HTTP data API over D1).
+
+name = "gridbase-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# An on-demand HTTP API (no cron triggers).
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gridbase"
+database_id = "<your-d1-database-id>"
+migrations_dir = "migrations"
+migrations_table = "grid_migrations"
+
+# Secrets (set via `wrangler secret put`):
+#   GRID_API_SECRET   (required — gates every /v1 route; the web BFF sends it as
+#                      `Authorization: Bearer <secret>`)
+#
+#   cd packages/api && npx wrangler secret put GRID_API_SECRET
+#
+# For local dev, put GRID_DEV_OPEN=1 in packages/api/.dev.vars (gitignored) to
+# allow /v1 without a secret. Production fails closed when GRID_API_SECRET is unset.
