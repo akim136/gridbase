@@ -59,6 +59,7 @@ export interface ViewConfig {
   kanban?: { stackFieldId: string };
   calendar?: { dateFieldId: string };
   form?: { title?: string; fieldIds: string[]; redirectMessage?: string };
+  dashboard?: { dateFieldId: string; metricFieldIds: string[] };
   /** Table view: freeze the header row (default true) + N leading columns (default 1). */
   freezeHeader?: boolean;
   frozen?: number;
@@ -68,7 +69,7 @@ export interface ViewMeta {
   viewId: string;
   tableId: string;
   name: string;
-  type: "table" | "kanban" | "calendar" | "form" | "detail";
+  type: "table" | "kanban" | "calendar" | "form" | "detail" | "dashboard";
   position: number;
   isHidden: boolean;
   config: ViewConfig;

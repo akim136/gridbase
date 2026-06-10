@@ -71,7 +71,7 @@ export interface ViewMeta {
   viewId: string;
   tableId: string;
   name: string;
-  type: "table" | "kanban" | "calendar" | "form" | "detail";
+  type: "table" | "kanban" | "calendar" | "form" | "detail" | "dashboard";
   position: number;
   isHidden: boolean;
   config: ViewConfig;
@@ -96,6 +96,7 @@ export interface ViewConfig {
   kanban?: { stackFieldId: string };
   calendar?: { dateFieldId: string };
   form?: { title?: string; fieldIds: string[]; redirectMessage?: string };
+  dashboard?: { dateFieldId: string; metricFieldIds: string[] };
 }
 
 export interface Registry {

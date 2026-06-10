@@ -1,5 +1,8 @@
 # gridbase — an open-source Airtable that fronts your own database
 
+[![CI](https://github.com/akim136/gridbase/actions/workflows/ci.yml/badge.svg)](https://github.com/akim136/gridbase/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 gridbase is a metadata-driven, database-backed workspace. It gives you Airtable's
 spreadsheet-meets-database experience — tables, multiple views, relations,
 formulas, lookups, filters, and inline editing — **over your own data source**
