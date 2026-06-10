@@ -78,13 +78,13 @@ TABLES.forEach((t, ti) => {
 });
 
 // ---- a demo dashboard (workspace-level report composer over the CRM) -------
-const DEALS = "tbl_6b116201014a93e2";
+const DEALS_TID = "tbl_6b116201014a93e2";
 const dashboardWidgets = [
-  { widgetId: "wgt_pipeline", type: "kpi", title: "Pipeline value", tableId: DEALS, agg: "sum", metricFieldId: "fld_32535ebf764c27b1" },
-  { widgetId: "wgt_count", type: "kpi", title: "Open deals", tableId: DEALS, agg: "count" },
-  { widgetId: "wgt_by_stage", type: "bar", title: "Deals by stage", tableId: DEALS, agg: "count", groupByFieldId: "fld_ab8460da74d9c748" },
-  { widgetId: "wgt_over_time", type: "line", title: "Amount by month", tableId: DEALS, agg: "sum", metricFieldId: "fld_32535ebf764c27b1", groupByFieldId: "fld_6f0bae1cf3cda9f7", bucket: "month" },
-  { widgetId: "wgt_recent", type: "table", title: "Deals", tableId: DEALS, fieldIds: ["fld_72fbfcec5a293bb7", "fld_32535ebf764c27b1", "fld_ab8460da74d9c748"] },
+  { widgetId: "wgt_pipeline", type: "kpi", title: "Pipeline value", tableId: DEALS_TID, agg: "sum", metricFieldId: "fld_32535ebf764c27b1" },
+  { widgetId: "wgt_count", type: "kpi", title: "Open deals", tableId: DEALS_TID, agg: "count" },
+  { widgetId: "wgt_by_stage", type: "bar", title: "Deals by stage", tableId: DEALS_TID, agg: "count", groupByFieldId: "fld_ab8460da74d9c748" },
+  { widgetId: "wgt_over_time", type: "line", title: "Amount by month", tableId: DEALS_TID, agg: "sum", metricFieldId: "fld_32535ebf764c27b1", groupByFieldId: "fld_6f0bae1cf3cda9f7", bucket: "month" },
+  { widgetId: "wgt_recent", type: "table", title: "Deals", tableId: DEALS_TID, fieldIds: ["fld_72fbfcec5a293bb7", "fld_32535ebf764c27b1", "fld_ab8460da74d9c748"] },
 ];
 out.push(
   "INSERT OR REPLACE INTO meta_dashboards (dashboard_id, workspace_id, name, position, is_hidden, config) " +
