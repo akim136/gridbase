@@ -1,5 +1,5 @@
 "use client";
-import type { ViewConfig, ViewMeta } from "./types";
+import type { DashboardMeta, ViewConfig, ViewMeta, Widget } from "./types";
 
 /**
  * Browser-side calls to the BFF (/api/grid/* → grid-api /v1/*). The Bearer
@@ -31,6 +31,16 @@ export const createView = (input: { tableId: string; name: string; type: string;
   call<ViewMeta>("POST", "views", input);
 
 export const deleteView = (viewId: string) => call<{ deleted: boolean }>("DELETE", `views/${viewId}`);
+
+// ---- dashboard mutations --------------------------------------------------
+
+export const createDashboard = (input: { name: string; config?: { widgets: Widget[] } }) =>
+  call<DashboardMeta>("POST", "dashboards", input);
+
+export const updateDashboard = (id: string, input: { name?: string; config?: { widgets: Widget[] }; position?: number; isHidden?: boolean }) =>
+  call<DashboardMeta>("PATCH", `dashboards/${id}`, input);
+
+export const deleteDashboard = (id: string) => call<{ deleted: boolean }>("DELETE", `dashboards/${id}`);
 
 // ---- record mutations (typecast: true → resolve selects/links given by name) ----
 

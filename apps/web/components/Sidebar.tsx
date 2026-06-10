@@ -33,6 +33,17 @@ export function Sidebar({ tables }: { tables: SidebarTable[] }) {
           »
         </button>
         <ul className="mt-2 flex flex-col items-center gap-1">
+          <li>
+            <Link
+              href="/d"
+              title="Dashboards"
+              className={`flex h-7 w-7 items-center justify-center rounded-md text-xs ${
+                pathname.startsWith("/d") ? "bg-blue-50 text-blue-700" : "text-neutral-500 hover:bg-surface-muted"
+              }`}
+            >
+              📊
+            </Link>
+          </li>
           {tables.map((t) => {
             const active = pathname.startsWith(`/t/${t.tableId}/`);
             return (
@@ -66,6 +77,17 @@ export function Sidebar({ tables }: { tables: SidebarTable[] }) {
         </button>
       </div>
       <ul className="space-y-0.5 px-2">
+        <li>
+          <Link
+            href="/d"
+            className={`block rounded-md px-3 py-1.5 text-sm ${
+              pathname.startsWith("/d") ? "bg-blue-50 font-medium text-blue-700" : "text-neutral-700 hover:bg-surface-muted"
+            }`}
+          >
+            📊 Dashboards
+          </Link>
+        </li>
+        <li className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-wide text-neutral-400">Tables</li>
         {tables.map((t) => {
           const active = pathname.startsWith(`/t/${t.tableId}/`);
           return (

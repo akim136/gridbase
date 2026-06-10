@@ -79,6 +79,41 @@ export interface Meta {
   tables: TableMeta[];
   fields: FieldMeta[];
   views: ViewMeta[];
+  dashboards: DashboardMeta[];
+}
+
+// ---- dashboards (the report composer) -------------------------------------
+
+export type AggFn = "count" | "sum" | "avg" | "min" | "max";
+export type DateBucket = "day" | "week" | "month" | "year";
+export type WidgetType = "kpi" | "line" | "bar" | "table";
+
+export interface Widget {
+  widgetId: string;
+  type: WidgetType;
+  title: string;
+  tableId: string;
+  metricFieldId?: string;
+  agg?: AggFn;
+  groupByFieldId?: string;
+  bucket?: DateBucket;
+  fieldIds?: string[];
+  filter?: { conjunction: "and" | "or"; conditions: FilterCondition[] };
+}
+
+export interface DashboardMeta {
+  dashboardId: string;
+  workspaceId: string | null;
+  name: string;
+  position: number;
+  isHidden: boolean;
+  config: { widgets: Widget[] };
+}
+
+/** One aggregated row from GET /v1/tables/:id/aggregate. */
+export interface AggregateRow {
+  groupValue: string | null;
+  value: number;
 }
 
 export interface RecordEnvelope {

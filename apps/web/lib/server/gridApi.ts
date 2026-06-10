@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import type { ListResult, Meta, RecordEnvelope } from "../types";
+import type { AggregateRow, ListResult, Meta, RecordEnvelope, Widget } from "../types";
 
 /**
  * Server-only client for grid-api. Server Components call this directly (the
@@ -53,4 +53,46 @@ export function listRecords(tableId: string, params: ListParams = {}): Promise<L
 
 export function getRecord(tableId: string, id: string): Promise<RecordEnvelope> {
   return call<RecordEnvelope>(`/v1/tables/${encodeURIComponent(tableId)}/records/${encodeURIComponent(id)}`);
+}
+
+/** Grouped aggregation for a dashboard widget. */
+export function getAggregate(
+  tableId: string,
+  spec: { agg: string; metric?: string; groupBy?: string; bucket?: string; filter?: object },
+): Promise<{ rows: AggregateRow[] }> {
+  const q = new URLSearchParams({ agg: spec.agg });
+  if (spec.metric) q.set("metric", spec.metric);
+  if (spec.groupBy) q.set("groupBy", spec.groupBy);
+  if (spec.bucket) q.set("bucket", spec.bucket);
+  if (spec.filter) q.set("filter", JSON.stringify(spec.filter));
+  return call<{ rows: AggregateRow[] }>(`/v1/tables/${encodeURIComponent(tableId)}/aggregate?${q.toString()}`);
+}
+
+/** Compute every widget's data server-side (secret stays on the server). Returns a
+ *  map widgetId → result, tolerating a single widget's failure (so one bad widget
+ *  can't blank the whole dashboard). */
+export async function computeWidgets(
+  widgets: Widget[],
+): Promise<Record<string, { rows?: AggregateRow[]; records?: RecordEnvelope[]; error?: string }>> {
+  const entries = await Promise.all(
+    widgets.map(async (w) => {
+      try {
+        if (w.type === "table") {
+          const res = await listRecords(w.tableId, { fields: w.fieldIds, filter: w.filter, pageSize: 20 });
+          return [w.widgetId, { records: res.records }] as const;
+        }
+        const { rows } = await getAggregate(w.tableId, {
+          agg: w.agg ?? "count",
+          metric: w.metricFieldId,
+          groupBy: w.groupByFieldId,
+          bucket: w.bucket,
+          filter: w.filter,
+        });
+        return [w.widgetId, { rows }] as const;
+      } catch (e) {
+        return [w.widgetId, { error: e instanceof Error ? e.message : String(e) }] as const;
+      }
+    }),
+  );
+  return Object.fromEntries(entries);
 }
