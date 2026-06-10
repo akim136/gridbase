@@ -11,7 +11,6 @@ const meta: Meta = {
     { fieldId: "fldRate", tableId: "tblWM", name: "Reply Rate", type: "formula", options: null, isComputed: true, isPrimary: false, position: 3 },
   ],
   views: [],
-  dashboards: [],
 };
 
 const view = (config: ViewMeta["config"]): ViewMeta => ({ viewId: "v1", tableId: "tblWM", name: "Trends", type: "dashboard", position: 1, isHidden: false, config });
