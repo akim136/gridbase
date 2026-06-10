@@ -62,7 +62,7 @@ export function buildAggregate(spec: AggregateSpec, reg: Registry, tableId: stri
     }
   }
 
-  const where = buildWhere(spec.filter, reg, table.slug);
+  const where = buildWhere(spec.filter, reg.fieldById, table.slug);
   const select = groupExpr ? `${groupExpr} AS g, ${valueExpr} AS v` : `${valueExpr} AS v`;
   const grouping = groupExpr ? ` GROUP BY ${groupExpr} ORDER BY ${groupExpr}` : "";
   const sql = `SELECT ${select} FROM ${table.slug} ${where.sql}${grouping}`.replace(/\s+/g, " ").trim();
