@@ -3,6 +3,7 @@ import type { AggFn, DashboardConfig, DashboardMeta, Registry, Widget } from "./
 
 const WIDGET_TYPES = new Set<Widget["type"]>(["kpi", "line", "bar", "table"]);
 const AGGS = new Set<AggFn>(["count", "sum", "avg", "min", "max"]);
+const MAX_WIDGETS = 50;
 
 function newDashboardId(): string {
   return "dsh" + crypto.randomUUID().replace(/-/g, "").slice(0, 14);
@@ -46,6 +47,7 @@ async function readDashboard(db: D1Database, id: string): Promise<DashboardMeta 
 function validateConfig(config: DashboardConfig | undefined, reg: Registry): DashboardConfig {
   const widgets = config?.widgets ?? [];
   if (!Array.isArray(widgets)) throw new HttpError(400, "config.widgets must be an array");
+  if (widgets.length > MAX_WIDGETS) throw new HttpError(400, `too many widgets (max ${MAX_WIDGETS})`);
   for (const w of widgets) {
     if (!WIDGET_TYPES.has(w.type)) throw new HttpError(400, `invalid widget type: ${w.type}`);
     if (!reg.tables.some((t) => t.tableId === w.tableId)) throw new HttpError(400, `widget references unknown table: ${w.tableId}`);
@@ -55,6 +57,14 @@ function validateConfig(config: DashboardConfig | undefined, reg: Registry): Das
     if (w.agg && !AGGS.has(w.agg)) throw new HttpError(400, `invalid agg: ${w.agg}`);
     for (const fid of w.fieldIds ?? []) if (!inTable(fid)) throw new HttpError(400, "widget field is not in its table");
     for (const c of w.filter?.conditions ?? []) if (!inTable(c.fieldId)) throw new HttpError(400, "widget filter field is not in its table");
+    // Fail fast on a widget that can't run: aggregates beyond count need a metric;
+    // charts need an x-axis.
+    if (w.type !== "table" && (w.agg ?? "count") !== "count" && !w.metricFieldId) {
+      throw new HttpError(400, `${w.agg} widget needs a metric field`);
+    }
+    if ((w.type === "line" || w.type === "bar") && !w.groupByFieldId) {
+      throw new HttpError(400, "chart widget needs a group-by field");
+    }
   }
   return { widgets };
 }

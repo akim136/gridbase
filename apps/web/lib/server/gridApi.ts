@@ -81,11 +81,13 @@ export async function computeWidgets(
           const res = await listRecords(w.tableId, { fields: w.fieldIds, filter: w.filter, pageSize: 20 });
           return [w.widgetId, { records: res.records }] as const;
         }
+        // A KPI is a single total — never group it, even if a stale groupBy lingers.
+        const isKpi = w.type === "kpi";
         const { rows } = await getAggregate(w.tableId, {
           agg: w.agg ?? "count",
           metric: w.metricFieldId,
-          groupBy: w.groupByFieldId,
-          bucket: w.bucket,
+          groupBy: isKpi ? undefined : w.groupByFieldId,
+          bucket: isKpi ? undefined : w.bucket,
           filter: w.filter,
         });
         return [w.widgetId, { rows }] as const;
