@@ -16,6 +16,8 @@
  *   DELETE /v1/tables/:tableId/records       → delete (?records[]=…)
  *   POST   /v1/views, PATCH/DELETE /v1/views/:id → manage views
  */
+import { aggregate } from "./aggregate.js";
+import { createDashboard, deleteDashboard, updateDashboard } from "./dashboards.js";
 import { loadRegistry } from "./meta.js";
 import {
   createRecords,
@@ -28,7 +30,7 @@ import {
   type WriteInput,
 } from "./repo.js";
 import { createView, deleteView, updateView } from "./views.js";
-import type { FilterSpec, Registry, ViewConfig } from "./types.js";
+import type { AggregateSpec, DashboardConfig, FilterSpec, Registry, ViewConfig } from "./types.js";
 
 export interface Env {
   DB: D1Database;
@@ -78,7 +80,28 @@ function metaResponse(reg: Registry) {
     })),
     fields,
     views: reg.views,
+    dashboards: reg.dashboards,
   };
+}
+
+/** Parse aggregate query params (groupBy/metric/agg/bucket/filter) into a spec. */
+function parseAggregateSpec(url: URL): AggregateSpec {
+  const spec: AggregateSpec = { agg: (url.searchParams.get("agg") ?? "count") as AggregateSpec["agg"] };
+  const groupBy = url.searchParams.get("groupBy");
+  if (groupBy) spec.groupBy = groupBy;
+  const metric = url.searchParams.get("metric");
+  if (metric) spec.metric = metric;
+  const bucket = url.searchParams.get("bucket");
+  if (bucket) spec.bucket = bucket as AggregateSpec["bucket"];
+  const filter = url.searchParams.get("filter");
+  if (filter) {
+    try {
+      spec.filter = JSON.parse(filter) as FilterSpec;
+    } catch {
+      throw new HttpError(400, "invalid filter param (expected JSON)");
+    }
+  }
+  return spec;
 }
 
 /** Parse list query params into ListOpts. filter is base64-encoded JSON. */
@@ -180,6 +203,37 @@ export default {
           return ok ? json({ deleted: true, id: viewId }) : json({ error: "not found" }, 404);
         }
         return json({ error: "method not allowed" }, 405);
+      }
+
+      // /v1/dashboards  (create)  and  /v1/dashboards/:dashboardId  (update/delete)
+      if (request.method === "POST" && pathname === "/v1/dashboards") {
+        const body = (await request.json().catch(() => null)) as
+          | { name?: string; workspaceId?: string | null; config?: DashboardConfig }
+          | null;
+        if (!body?.name) return json({ error: "expected { name, config? }" }, 400);
+        const dash = await createDashboard(env.DB, reg, { name: body.name, workspaceId: body.workspaceId, config: body.config });
+        return json(dash);
+      }
+      const dm = pathname.match(/^\/v1\/dashboards\/([^/]+)$/);
+      if (dm) {
+        const dashboardId = decodeURIComponent(dm[1]!);
+        if (request.method === "PATCH") {
+          const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+          const dash = await updateDashboard(env.DB, reg, dashboardId, body);
+          return json(dash);
+        }
+        if (request.method === "DELETE") {
+          const ok = await deleteDashboard(env.DB, dashboardId);
+          return ok ? json({ deleted: true, id: dashboardId }) : json({ error: "not found" }, 404);
+        }
+        return json({ error: "method not allowed" }, 405);
+      }
+
+      // /v1/tables/:tableId/aggregate  → grouped aggregation for dashboard widgets
+      const am = pathname.match(/^\/v1\/tables\/([^/]+)\/aggregate$/);
+      if (am && request.method === "GET") {
+        const rows = await aggregate(env.DB, reg, decodeURIComponent(am[1]!), parseAggregateSpec(url));
+        return json({ rows });
       }
 
       // /v1/tables/:tableId/records  and  /v1/tables/:tableId/records/:id

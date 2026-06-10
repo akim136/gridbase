@@ -104,6 +104,52 @@ export interface Registry {
   fieldsByTable: Map<string, FieldMeta[]>;
   fieldById: Map<string, FieldMeta>;
   views: ViewMeta[];
+  dashboards: DashboardMeta[];
+}
+
+// ---- dashboards: a workspace-level report composer -------------------------
+
+export type AggFn = "count" | "sum" | "avg" | "min" | "max";
+export type DateBucket = "day" | "week" | "month" | "year";
+
+/** A grouped aggregation over one table: e.g. SUM(amount) GROUP BY month(close_date). */
+export interface AggregateSpec {
+  /** fieldId of a stored column to group by; omit for a single total. */
+  groupBy?: string;
+  /** fieldId of a number column; required for sum/avg/min/max. */
+  metric?: string;
+  agg: AggFn;
+  /** date bucketing, applied when groupBy is a date/datetime column. */
+  bucket?: DateBucket;
+  filter?: FilterSpec;
+}
+
+export type WidgetType = "kpi" | "line" | "bar" | "table";
+
+export interface Widget {
+  widgetId: string;
+  type: WidgetType;
+  title: string;
+  tableId: string;
+  metricFieldId?: string;     // kpi/line/bar
+  agg?: AggFn;                // kpi/line/bar (default count)
+  groupByFieldId?: string;    // line/bar x-axis (date or category)
+  bucket?: DateBucket;
+  fieldIds?: string[];        // table widget columns
+  filter?: FilterSpec;
+}
+
+export interface DashboardConfig {
+  widgets: Widget[];
+}
+
+export interface DashboardMeta {
+  dashboardId: string;
+  workspaceId: string | null;
+  name: string;
+  position: number;
+  isHidden: boolean;
+  config: DashboardConfig;
 }
 
 /** Airtable-shaped record envelope (the wire contract the adapter mirrors). */
