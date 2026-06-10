@@ -96,13 +96,29 @@ function parseAggregateSpec(url: URL): AggregateSpec {
   if (bucket) spec.bucket = bucket as AggregateSpec["bucket"];
   const filter = url.searchParams.get("filter");
   if (filter) {
+    let parsed: FilterSpec;
     try {
-      spec.filter = JSON.parse(filter) as FilterSpec;
+      parsed = JSON.parse(filter) as FilterSpec;
     } catch {
       throw new HttpError(400, "invalid filter param (expected JSON)");
     }
+    spec.filter = assertFilterBounds(parsed);
   }
   return spec;
+}
+
+/** Bound a filter so one request can't build a pathologically large query. */
+function assertFilterBounds(parsed: FilterSpec): FilterSpec {
+  const conditions = parsed.conditions ?? [];
+  if (conditions.length > MAX_FILTER_CONDITIONS) {
+    throw new HttpError(400, `too many filter conditions (max ${MAX_FILTER_CONDITIONS})`);
+  }
+  for (const c of conditions) {
+    if (Array.isArray(c.value) && c.value.length > MAX_ANYOF_VALUES) {
+      throw new HttpError(400, `too many values in a condition (max ${MAX_ANYOF_VALUES})`);
+    }
+  }
+  return parsed;
 }
 
 /** Parse list query params into ListOpts. filter is base64-encoded JSON. */

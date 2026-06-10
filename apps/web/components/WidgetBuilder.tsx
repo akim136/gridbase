@@ -53,7 +53,7 @@ export function WidgetBuilder({ meta, initial, onSave, onClose }: { meta: Meta; 
           {TYPES.map((t) => (
             <button
               key={t.type}
-              onClick={() => set({ type: t.type, ...(t.type === "kpi" || t.type === "table" ? { groupByFieldId: undefined, bucket: undefined } : {}) })}
+              onClick={() => set({ type: t.type })}
               className={`rounded-md border px-2 py-1.5 text-xs ${w.type === t.type ? "border-blue-500 bg-blue-50 text-blue-700" : "border-neutral-300 text-neutral-600 hover:bg-surface-muted"}`}
             >
               {t.label}

@@ -54,6 +54,7 @@ function validateConfig(config: DashboardConfig | undefined, reg: Registry): Das
     if (!inTable(w.groupByFieldId)) throw new HttpError(400, "widget groupBy field is not in its table");
     if (w.agg && !AGGS.has(w.agg)) throw new HttpError(400, `invalid agg: ${w.agg}`);
     for (const fid of w.fieldIds ?? []) if (!inTable(fid)) throw new HttpError(400, "widget field is not in its table");
+    for (const c of w.filter?.conditions ?? []) if (!inTable(c.fieldId)) throw new HttpError(400, "widget filter field is not in its table");
   }
   return { widgets };
 }
