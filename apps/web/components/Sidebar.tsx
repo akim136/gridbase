@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -29,10 +30,24 @@ export function Sidebar({ tables }: { tables: SidebarTable[] }) {
   if (collapsed) {
     return (
       <nav className="flex w-11 flex-shrink-0 flex-col items-center border-r border-surface-border bg-white py-3">
+        <Link href="/" title="gridbase" className="mb-1">
+          <Image src="/grid.png" alt="gridbase" width={28} height={28} className="rounded" />
+        </Link>
         <button onClick={toggle} title="Expand sidebar" className="rounded-md p-1.5 text-neutral-400 hover:bg-surface-muted hover:text-neutral-700">
           »
         </button>
         <ul className="mt-2 flex flex-col items-center gap-1">
+          <li>
+            <Link
+              href="/d"
+              title="Dashboards"
+              className={`flex h-7 w-7 items-center justify-center rounded-md text-xs ${
+                pathname.startsWith("/d") ? "bg-blue-50 text-blue-700" : "text-neutral-500 hover:bg-surface-muted"
+              }`}
+            >
+              📊
+            </Link>
+          </li>
           {tables.map((t) => {
             const active = pathname.startsWith(`/t/${t.tableId}/`);
             return (
@@ -57,15 +72,31 @@ export function Sidebar({ tables }: { tables: SidebarTable[] }) {
   return (
     <nav className="w-56 flex-shrink-0 border-r border-surface-border bg-white">
       <div className="flex items-start justify-between px-4 py-4">
-        <div>
-          <Link href="/" className="text-sm font-semibold tracking-tight text-neutral-900">gridbase</Link>
-          <p className="mt-0.5 text-[11px] text-neutral-400">workspace</p>
+        <div className="flex items-center gap-2">
+          <Link href="/" title="gridbase" className="flex-shrink-0">
+            <Image src="/grid.png" alt="gridbase" width={28} height={28} className="rounded" />
+          </Link>
+          <div>
+            <Link href="/" className="text-sm font-semibold tracking-tight text-neutral-900">gridbase</Link>
+            <p className="mt-0.5 text-[11px] text-neutral-400">workspace</p>
+          </div>
         </div>
         <button onClick={toggle} title="Collapse sidebar" className="rounded-md p-1 text-neutral-400 hover:bg-surface-muted hover:text-neutral-700">
           «
         </button>
       </div>
       <ul className="space-y-0.5 px-2">
+        <li>
+          <Link
+            href="/d"
+            className={`block rounded-md px-3 py-1.5 text-sm ${
+              pathname.startsWith("/d") ? "bg-blue-50 font-medium text-blue-700" : "text-neutral-700 hover:bg-surface-muted"
+            }`}
+          >
+            📊 Dashboards
+          </Link>
+        </li>
+        <li className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-wide text-neutral-400">Tables</li>
         {tables.map((t) => {
           const active = pathname.startsWith(`/t/${t.tableId}/`);
           return (

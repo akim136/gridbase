@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { CalendarView } from "@/components/CalendarView";
+import { DashboardView } from "@/components/DashboardView";
 import { FormRenderer } from "@/components/FormRenderer";
 import { ImportButton } from "@/components/ImportDialog";
 import { KanbanView } from "@/components/KanbanView";
@@ -55,17 +56,19 @@ export default async function ViewPage({
         </div>
         <div className="mt-3 flex items-center justify-between">
           <ViewSwitcher tableId={tableId} currentViewId={viewId} views={allViews} currentConfig={view.config} />
-          {view.type !== "form" ? <ViewToolbar viewId={viewId} fields={fields} config={view.config} /> : null}
+          {view.type !== "form" ? <ViewToolbar viewId={viewId} fields={fields} config={view.config} meta={meta} /> : null}
         </div>
       </header>
 
-      <div className={`flex-1 p-5 ${view.type === "kanban" || view.type === "calendar" || view.type === "form" ? "overflow-auto" : "overflow-hidden"}`}>
+      <div className={`flex-1 p-5 ${view.type === "kanban" || view.type === "calendar" || view.type === "form" || view.type === "dashboard" ? "overflow-auto" : "overflow-hidden"}`}>
         {view.type === "kanban" ? (
           <KanbanView meta={meta} view={view} records={records} labels={labels} />
         ) : view.type === "calendar" ? (
           <CalendarView meta={meta} view={view} records={records} />
         ) : view.type === "form" ? (
           <FormRenderer tableId={tableId} fields={visibleFields(meta, view)} title={view.config.form?.title ?? view.name} />
+        ) : view.type === "dashboard" ? (
+          <DashboardView meta={meta} view={view} records={records} />
         ) : (
           <TableView meta={meta} view={view} records={records} labels={labels} />
         )}

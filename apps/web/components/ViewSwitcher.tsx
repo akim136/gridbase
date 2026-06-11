@@ -12,12 +12,13 @@ export interface SwitcherView {
   isHidden: boolean;
 }
 
-const TYPE_ICON: Record<string, string> = { table: "▦", kanban: "▤", calendar: "▥", form: "✎", detail: "❏" };
+const TYPE_ICON: Record<string, string> = { table: "▦", kanban: "▤", calendar: "▥", form: "✎", detail: "❏", dashboard: "📊" };
 const ADDABLE = [
   { type: "table", label: "Grid" },
   { type: "kanban", label: "Kanban" },
   { type: "calendar", label: "Calendar" },
   { type: "form", label: "Form" },
+  { type: "dashboard", label: "Dashboard" },
 ];
 
 /** Tabs across a table's views + a manager (add / rename / duplicate / hide / delete). */
