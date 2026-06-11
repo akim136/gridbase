@@ -44,19 +44,35 @@ export interface TableMeta {
 
 export interface FilterCondition {
   fieldId: string;
+  /** When `fieldId` is a link/lookup field, the sub-field of the linked table to
+   *  compare on; defaults to the linked table's primary field. */
+  linkedFieldId?: string;
   op: "is" | "isNot" | "isEmpty" | "isNotEmpty" | "contains" | "gt" | "lt" | "before" | "after" | "anyOf";
   value?: unknown;
+}
+
+/** A one-level-deep AND/OR group; contains only leaf conditions. */
+export interface FilterGroup {
+  conjunction: "and" | "or";
+  conditions: FilterCondition[];
+}
+
+export type FilterItem = FilterCondition | FilterGroup;
+
+/** True when a filter item is a group rather than a leaf condition. */
+export function isFilterGroup(item: FilterItem): item is FilterGroup {
+  return Array.isArray((item as FilterGroup).conditions);
 }
 
 export interface ViewConfig {
   fields?: Array<{ fieldId: string; width?: number }>;
   filters?: {
     conjunction: "and" | "or";
-    conditions: FilterCondition[];
+    conditions: FilterItem[];
   };
-  sorts?: Array<{ fieldId: string; direction?: "asc" | "desc" }>;
+  sorts?: Array<{ fieldId: string; linkedFieldId?: string; direction?: "asc" | "desc" }>;
   groupBy?: string;
-  kanban?: { stackFieldId: string };
+  kanban?: { stackFieldId: string; maxPreviewFields?: number };
   calendar?: { dateFieldId: string };
   form?: { title?: string; fieldIds: string[]; redirectMessage?: string };
   dashboard?: { dateFieldId: string; metricFieldIds: string[] };
@@ -79,6 +95,41 @@ export interface Meta {
   tables: TableMeta[];
   fields: FieldMeta[];
   views: ViewMeta[];
+  dashboards: DashboardMeta[];
+}
+
+// ---- dashboards (the report composer) -------------------------------------
+
+export type AggFn = "count" | "sum" | "avg" | "min" | "max";
+export type DateBucket = "day" | "week" | "month" | "year";
+export type WidgetType = "kpi" | "line" | "bar" | "table";
+
+export interface Widget {
+  widgetId: string;
+  type: WidgetType;
+  title: string;
+  tableId: string;
+  metricFieldId?: string;
+  agg?: AggFn;
+  groupByFieldId?: string;
+  bucket?: DateBucket;
+  fieldIds?: string[];
+  filter?: { conjunction: "and" | "or"; conditions: FilterCondition[] };
+}
+
+export interface DashboardMeta {
+  dashboardId: string;
+  workspaceId: string | null;
+  name: string;
+  position: number;
+  isHidden: boolean;
+  config: { widgets: Widget[] };
+}
+
+/** One aggregated row from GET /v1/tables/:id/aggregate. */
+export interface AggregateRow {
+  groupValue: string | null;
+  value: number;
 }
 
 export interface RecordEnvelope {

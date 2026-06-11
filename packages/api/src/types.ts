@@ -79,21 +79,39 @@ export interface ViewMeta {
 
 export interface FilterCondition {
   fieldId: string;
+  /** When `fieldId` is a link (or lookup) field, names the sub-field in the
+   *  linked table to compare on; defaults to the linked table's primary field. */
+  linkedFieldId?: string;
   op: "is" | "isNot" | "isEmpty" | "isNotEmpty" | "contains" | "gt" | "lt" | "before" | "after" | "anyOf";
   value?: unknown;
 }
 
-export interface FilterSpec {
+/** A one-level-deep AND/OR group; contains only leaf conditions. */
+export interface FilterGroup {
   conjunction: "and" | "or";
   conditions: FilterCondition[];
+}
+
+/** True when an item in a FilterSpec is a group (has nested conditions) rather
+ *  than a leaf condition (which carries an `op`). */
+export function isFilterGroup(item: FilterCondition | FilterGroup): item is FilterGroup {
+  return Array.isArray((item as FilterGroup).conditions);
+}
+
+export interface FilterSpec {
+  conjunction: "and" | "or";
+  /** Top-level items: leaf conditions and/or one-level groups. Old flat specs
+   *  (conditions only) remain valid. */
+  conditions: Array<FilterCondition | FilterGroup>;
 }
 
 export interface ViewConfig {
   fields?: Array<{ fieldId: string; width?: number }>;
   filters?: FilterSpec;
-  sorts?: Array<{ fieldId: string; direction?: "asc" | "desc" }>;
+  /** `linkedFieldId` sorts by a sub-field of the linked table (see FilterCondition). */
+  sorts?: Array<{ fieldId: string; linkedFieldId?: string; direction?: "asc" | "desc" }>;
   groupBy?: string;
-  kanban?: { stackFieldId: string };
+  kanban?: { stackFieldId: string; maxPreviewFields?: number };
   calendar?: { dateFieldId: string };
   form?: { title?: string; fieldIds: string[]; redirectMessage?: string };
   dashboard?: { dateFieldId: string; metricFieldIds: string[] };
@@ -104,6 +122,52 @@ export interface Registry {
   fieldsByTable: Map<string, FieldMeta[]>;
   fieldById: Map<string, FieldMeta>;
   views: ViewMeta[];
+  dashboards: DashboardMeta[];
+}
+
+// ---- dashboards: a workspace-level report composer -------------------------
+
+export type AggFn = "count" | "sum" | "avg" | "min" | "max";
+export type DateBucket = "day" | "week" | "month" | "year";
+
+/** A grouped aggregation over one table: e.g. SUM(amount) GROUP BY month(close_date). */
+export interface AggregateSpec {
+  /** fieldId of a stored column to group by; omit for a single total. */
+  groupBy?: string;
+  /** fieldId of a number column; required for sum/avg/min/max. */
+  metric?: string;
+  agg: AggFn;
+  /** date bucketing, applied when groupBy is a date/datetime column. */
+  bucket?: DateBucket;
+  filter?: FilterSpec;
+}
+
+export type WidgetType = "kpi" | "line" | "bar" | "table";
+
+export interface Widget {
+  widgetId: string;
+  type: WidgetType;
+  title: string;
+  tableId: string;
+  metricFieldId?: string;     // kpi/line/bar
+  agg?: AggFn;                // kpi/line/bar (default count)
+  groupByFieldId?: string;    // line/bar x-axis (date or category)
+  bucket?: DateBucket;
+  fieldIds?: string[];        // table widget columns
+  filter?: FilterSpec;
+}
+
+export interface DashboardConfig {
+  widgets: Widget[];
+}
+
+export interface DashboardMeta {
+  dashboardId: string;
+  workspaceId: string | null;
+  name: string;
+  position: number;
+  isHidden: boolean;
+  config: DashboardConfig;
 }
 
 /** Airtable-shaped record envelope (the wire contract the adapter mirrors). */

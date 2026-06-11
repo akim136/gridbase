@@ -1,4 +1,6 @@
 import type {
+  DashboardConfig,
+  DashboardMeta,
   FieldMeta,
   Registry,
   TableMeta,
@@ -76,8 +78,29 @@ export function invalidateRegistry(): void {
 }
 
 export async function loadRegistry(db: D1Database): Promise<Registry> {
-  const [schema, views] = await Promise.all([loadSchema(db), loadViews(db)]);
-  return { ...schema, views };
+  const [schema, views, dashboards] = await Promise.all([loadSchema(db), loadViews(db), loadDashboards(db)]);
+  return { ...schema, views, dashboards };
+}
+
+interface MetaDashboardRow {
+  dashboard_id: string;
+  workspace_id: string | null;
+  name: string;
+  position: number;
+  is_hidden: number;
+  config: string;
+}
+
+async function loadDashboards(db: D1Database): Promise<DashboardMeta[]> {
+  const res = await db.prepare("SELECT * FROM meta_dashboards ORDER BY position, name").all<MetaDashboardRow>();
+  return (res.results ?? []).map((r) => ({
+    dashboardId: r.dashboard_id,
+    workspaceId: r.workspace_id,
+    name: r.name,
+    position: r.position,
+    isHidden: r.is_hidden === 1,
+    config: parseJSON<DashboardConfig>(r.config, { widgets: [] }),
+  }));
 }
 
 async function loadViews(db: D1Database): Promise<ViewMeta[]> {
