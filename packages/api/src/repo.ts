@@ -155,8 +155,8 @@ export async function listRecords(
   const fields = reg.fieldsByTable.get(tableId) ?? [];
   const wanted = opts.fields && opts.fields.length ? new Set(opts.fields) : undefined;
 
-  const where = buildWhere(opts.filters, reg.fieldById, table.slug);
-  const orderBy = buildOrderBy(opts.sorts, reg.fieldById);
+  const where = buildWhere(opts.filters, reg, table.slug);
+  const orderBy = buildOrderBy(opts.sorts, reg, table.slug);
 
   const offset = Math.max(0, Number.parseInt(opts.offset ?? "0", 10) || 0);
   // Clamp to [0, MAX_PAGE]: a negative LIMIT means "no limit" in SQLite, so an

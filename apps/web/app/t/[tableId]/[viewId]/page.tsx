@@ -56,7 +56,7 @@ export default async function ViewPage({
         </div>
         <div className="mt-3 flex items-center justify-between">
           <ViewSwitcher tableId={tableId} currentViewId={viewId} views={allViews} currentConfig={view.config} />
-          {view.type !== "form" ? <ViewToolbar viewId={viewId} fields={fields} config={view.config} /> : null}
+          {view.type !== "form" ? <ViewToolbar viewId={viewId} fields={fields} config={view.config} meta={meta} /> : null}
         </div>
       </header>
 

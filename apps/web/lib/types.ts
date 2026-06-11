@@ -44,19 +44,35 @@ export interface TableMeta {
 
 export interface FilterCondition {
   fieldId: string;
+  /** When `fieldId` is a link/lookup field, the sub-field of the linked table to
+   *  compare on; defaults to the linked table's primary field. */
+  linkedFieldId?: string;
   op: "is" | "isNot" | "isEmpty" | "isNotEmpty" | "contains" | "gt" | "lt" | "before" | "after" | "anyOf";
   value?: unknown;
+}
+
+/** A one-level-deep AND/OR group; contains only leaf conditions. */
+export interface FilterGroup {
+  conjunction: "and" | "or";
+  conditions: FilterCondition[];
+}
+
+export type FilterItem = FilterCondition | FilterGroup;
+
+/** True when a filter item is a group rather than a leaf condition. */
+export function isFilterGroup(item: FilterItem): item is FilterGroup {
+  return Array.isArray((item as FilterGroup).conditions);
 }
 
 export interface ViewConfig {
   fields?: Array<{ fieldId: string; width?: number }>;
   filters?: {
     conjunction: "and" | "or";
-    conditions: FilterCondition[];
+    conditions: FilterItem[];
   };
-  sorts?: Array<{ fieldId: string; direction?: "asc" | "desc" }>;
+  sorts?: Array<{ fieldId: string; linkedFieldId?: string; direction?: "asc" | "desc" }>;
   groupBy?: string;
-  kanban?: { stackFieldId: string };
+  kanban?: { stackFieldId: string; maxPreviewFields?: number };
   calendar?: { dateFieldId: string };
   form?: { title?: string; fieldIds: string[]; redirectMessage?: string };
   dashboard?: { dateFieldId: string; metricFieldIds: string[] };
