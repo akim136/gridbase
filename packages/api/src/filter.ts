@@ -1,8 +1,100 @@
-import type { FieldMeta, FilterCondition, FilterSpec, ViewConfig } from "./types.js";
+import type { FieldMeta, FilterCondition, FilterSpec, Registry, ViewConfig } from "./types.js";
+import { isFilterGroup } from "./types.js";
 
 export interface SqlFragment {
   sql: string;
   binds: unknown[];
+}
+
+/** Resolve the {join,self,other,linkedTableId} + linked-table slug + target
+ *  column for traversing a link/lookup field to a sub-field of the linked
+ *  table. Returns null when the shape can't be resolved (caller skips). */
+function resolveLinkTarget(
+  field: FieldMeta,
+  linkedFieldId: string | undefined,
+  reg: Registry,
+): { join: string; self: string; other: string; linkedSlug: string; targetCol: string } | null {
+  // A lookup field traverses its own `via` link; a link field traverses itself.
+  let linkField = field;
+  if (field.type === "lookup") {
+    const via = field.options?.lookup?.via;
+    const vf = via ? reg.fieldById.get(via) : undefined;
+    if (!vf) return null;
+    linkField = vf;
+  }
+  const { join, self, other, linkedTableId } = (linkField.options ?? {}) as {
+    join?: string; self?: string; other?: string; linkedTableId?: string;
+  };
+  if (!join || !self || !other || !linkedTableId) return null;
+  const linkedTable = reg.tables.find((t) => t.tableId === linkedTableId);
+  if (!linkedTable) return null;
+
+  // Default the sub-field to the linked table's primary; a lookup pins `target`.
+  let targetFieldId = linkedFieldId;
+  if (field.type === "lookup" && !targetFieldId) targetFieldId = field.options?.lookup?.target;
+  if (!targetFieldId) targetFieldId = linkedTable.primaryFieldId;
+  const targetField = reg.fieldById.get(targetFieldId);
+  if (!targetField?.columnName) return null;
+
+  return { join, self, other, linkedSlug: linkedTable.slug, targetCol: targetField.columnName };
+}
+
+/** Comparison clause + binds for `<col> <op> ?` over an already-resolved column,
+ *  shared by stored-column and linked-sub-field paths. `dateish` truncates date
+ *  ops to the day. Returns null when the op needs a value it doesn't have. */
+function compare(col: string, type: FieldMeta["type"], op: FilterCondition["op"], value: unknown): SqlFragment | null {
+  const dateish = type === "date" || type === "datetime";
+  const val = resolveValue(value);
+  const valueOp = op !== "isEmpty" && op !== "isNotEmpty";
+  if (valueOp && type !== "checkbox" && (val === undefined || val === null)) return null;
+  const cval = type === "checkbox" ? (val ? 1 : 0) : val;
+
+  switch (op) {
+    case "is":
+      if (type === "checkbox") return { sql: cval ? `${col} = 1` : `(${col} IS NULL OR ${col} = 0)`, binds: [] };
+      return { sql: `${col} = ?`, binds: [cval] };
+    case "isNot":
+      if (type === "checkbox") return { sql: cval ? `(${col} IS NULL OR ${col} = 0)` : `${col} = 1`, binds: [] };
+      return { sql: `(${col} IS NULL OR ${col} != ?)`, binds: [cval] };
+    case "isEmpty": return { sql: emptyClause(col, type, false), binds: [] };
+    case "isNotEmpty": return { sql: emptyClause(col, type, true), binds: [] };
+    case "contains": return { sql: `${col} LIKE ?`, binds: [`%${String(cval)}%`] };
+    case "gt": return { sql: `${col} > ?`, binds: [cval] };
+    case "lt": return { sql: `${col} < ?`, binds: [cval] };
+    case "before": return { sql: dateish ? `date(${col}) < date(?)` : `${col} < ?`, binds: [cval] };
+    case "after": return { sql: dateish ? `date(${col}) > date(?)` : `${col} > ?`, binds: [cval] };
+    case "anyOf": {
+      const vals = Array.isArray(cval) ? cval : [cval];
+      if (vals.length === 0) return { sql: "0 = 1", binds: [] };
+      return { sql: `${col} IN (${vals.map(() => "?").join(", ")})`, binds: vals };
+    }
+    default: return null;
+  }
+}
+
+/** Filter on a sub-field of a linked record via a correlated EXISTS that joins
+ *  the link's join table to the linked table and compares the target column.
+ *  Emptiness is delegated to the link's own EXISTS shape. */
+function linkedFieldClause(
+  field: FieldMeta,
+  cond: FilterCondition,
+  tableSlug: string,
+  reg: Registry,
+): SqlFragment | null {
+  const t = resolveLinkTarget(field, cond.linkedFieldId, reg);
+  if (!t) return null;
+  const linkExists = `SELECT 1 FROM ${t.join} WHERE ${t.join}.${t.self} = ${tableSlug}.id`;
+  if (cond.op === "isEmpty") return { sql: `NOT EXISTS (${linkExists})`, binds: [] };
+  if (cond.op === "isNotEmpty") return { sql: `EXISTS (${linkExists})`, binds: [] };
+
+  // lt.<targetCol> is a bare column inside the subquery, not table-qualified at
+  // the outer level, so compare() gets `lt."col"`.
+  const cmp = compare(`lt."${t.targetCol}"`, reg.fieldById.get(cond.linkedFieldId ?? "")?.type ?? "text", cond.op, cond.value);
+  if (!cmp) return null;
+  const corr =
+    `EXISTS (SELECT 1 FROM ${t.join} j JOIN ${t.linkedSlug} lt ON lt.id = j.${t.other} ` +
+    `WHERE j.${t.self} = ${tableSlug}.id AND ${cmp.sql})`;
+  return { sql: corr, binds: cmp.binds };
 }
 
 /** Resolve a relative date value ({relative:'daysAgo', n}) to an ISO date. */
@@ -51,15 +143,41 @@ function linkClause(field: FieldMeta, cond: FilterCondition, tableSlug: string):
   }
 }
 
+/** Build the SQL fragment for a single leaf condition (stored column, link
+ *  membership, or linked sub-field). Returns null when the condition should be
+ *  skipped (unknown field, half-built row, formula). */
+function leafClause(
+  cond: FilterCondition,
+  reg: Registry,
+  tableSlug: string,
+): SqlFragment | null {
+  const field = reg.fieldById.get(cond.fieldId);
+  if (!field) return null;
+
+  // Link/lookup + a named sub-field → correlated EXISTS over the linked table.
+  // A lookup always traverses to its target even without an explicit linkedFieldId.
+  if ((field.type === "link" && cond.linkedFieldId) || field.type === "lookup") {
+    return linkedFieldClause(field, cond, tableSlug, reg);
+  }
+  // Link field with no sub-field → membership / emptiness over the join table.
+  if (field.type === "link" && field.options?.join) {
+    return linkClause(field, cond, tableSlug);
+  }
+  if (!field.columnName) return null; // formula → skip
+  return compare(`"${field.columnName}"`, field.type, cond.op, cond.value);
+}
+
 /**
  * Build a parameterized WHERE clause from a structured filter spec. Stored
- * columns and link fields are filterable; formula/lookup fields are skipped.
- * Returns an empty fragment when there's nothing to filter. Never interpolates
- * values — all go through bind params.
+ * columns, link fields, and (new) linked sub-fields / lookups are filterable;
+ * formula fields are skipped. Top-level items may be leaf conditions or
+ * one-level AND/OR groups (Airtable-style); a group's leaf clauses are
+ * parenthesized and joined by the group's own conjunction. Returns an empty
+ * fragment when there's nothing to filter. Never interpolates values.
  */
 export function buildWhere(
   filters: FilterSpec | undefined,
-  fieldById: Map<string, FieldMeta>,
+  reg: Registry,
   tableSlug: string,
 ): SqlFragment {
   if (!filters || filters.conditions.length === 0) return { sql: "", binds: [] };
@@ -67,66 +185,22 @@ export function buildWhere(
   const clauses: string[] = [];
   const binds: unknown[] = [];
 
-  for (const cond of filters.conditions) {
-    const field = fieldById.get(cond.fieldId);
-    if (!field) continue;
-    if (field.type === "link" && field.options?.join) {
-      const frag = linkClause(field, cond, tableSlug);
-      if (frag) { clauses.push(frag.sql); binds.push(...frag.binds); }
+  for (const item of filters.conditions) {
+    if (isFilterGroup(item)) {
+      const inner: string[] = [];
+      const innerBinds: unknown[] = [];
+      for (const cond of item.conditions) {
+        const frag = leafClause(cond, reg, tableSlug);
+        if (frag) { inner.push(frag.sql); innerBinds.push(...frag.binds); }
+      }
+      if (inner.length === 0) continue;
+      const joiner = item.conjunction === "or" ? " OR " : " AND ";
+      clauses.push(`(${inner.join(joiner)})`);
+      binds.push(...innerBinds);
       continue;
     }
-    if (!field.columnName) continue; // formula / lookup → skip
-    const col = `"${field.columnName}"`;
-    let val = resolveValue(cond.value);
-    // Skip value-requiring ops with no value yet (e.g. a half-built filter row in
-    // the UI) — otherwise we'd bind undefined and error. Checkbox coerces nullish
-    // to "unchecked", a valid filter, so it's exempt.
-    const valueOp = cond.op !== "isEmpty" && cond.op !== "isNotEmpty";
-    if (valueOp && field.type !== "checkbox" && (val === undefined || val === null)) continue;
-    // Checkboxes are stored as 1 / NULL (false is never stored), so normalize.
-    if (field.type === "checkbox") val = val ? 1 : 0;
-    // before/after are date semantics; truncate both sides to the day so a
-    // datetime column ('2026-06-09T09:00') compares correctly against a date.
-    const dateish = field.type === "date" || field.type === "datetime";
-
-    switch (cond.op) {
-      case "is":
-        if (field.type === "checkbox") {
-          clauses.push(val ? `${col} = 1` : `(${col} IS NULL OR ${col} = 0)`);
-        } else {
-          clauses.push(`${col} = ?`);
-          binds.push(val);
-        }
-        break;
-      case "isNot":
-        if (field.type === "checkbox") {
-          clauses.push(val ? `(${col} IS NULL OR ${col} = 0)` : `${col} = 1`);
-        } else {
-          clauses.push(`(${col} IS NULL OR ${col} != ?)`);
-          binds.push(val);
-        }
-        break;
-      case "isEmpty": clauses.push(emptyClause(col, field.type, false)); break;
-      case "isNotEmpty": clauses.push(emptyClause(col, field.type, true)); break;
-      case "contains": clauses.push(`${col} LIKE ?`); binds.push(`%${String(val)}%`); break;
-      case "gt": clauses.push(`${col} > ?`); binds.push(val); break;
-      case "lt": clauses.push(`${col} < ?`); binds.push(val); break;
-      case "before":
-        clauses.push(dateish ? `date(${col}) < date(?)` : `${col} < ?`);
-        binds.push(val);
-        break;
-      case "after":
-        clauses.push(dateish ? `date(${col}) > date(?)` : `${col} > ?`);
-        binds.push(val);
-        break;
-      case "anyOf": {
-        const vals = Array.isArray(val) ? val : [val];
-        if (vals.length === 0) { clauses.push("0 = 1"); break; }
-        clauses.push(`${col} IN (${vals.map(() => "?").join(", ")})`);
-        binds.push(...vals);
-        break;
-      }
-    }
+    const frag = leafClause(item, reg, tableSlug);
+    if (frag) { clauses.push(frag.sql); binds.push(...frag.binds); }
   }
 
   if (clauses.length === 0) return { sql: "", binds: [] };
@@ -134,17 +208,30 @@ export function buildWhere(
   return { sql: `WHERE ${clauses.join(joiner)}`, binds };
 }
 
-/** Build an ORDER BY clause from view sorts. Only stored columns are sortable. */
+/** Build an ORDER BY clause from view sorts. Stored columns sort directly;
+ *  link/lookup fields sort by a correlated scalar subquery over the linked
+ *  table's sub-field (default = linked primary). */
 export function buildOrderBy(
   sorts: ViewConfig["sorts"],
-  fieldById: Map<string, FieldMeta>,
+  reg: Registry,
+  tableSlug: string,
 ): string {
   if (!sorts || sorts.length === 0) return "";
   const parts: string[] = [];
   for (const s of sorts) {
-    const field = fieldById.get(s.fieldId);
-    if (!field || !field.columnName) continue;
+    const field = reg.fieldById.get(s.fieldId);
+    if (!field) continue;
     const dir = s.direction === "desc" ? "DESC" : "ASC";
+    if ((field.type === "link" && s.linkedFieldId) || field.type === "lookup") {
+      const t = resolveLinkTarget(field, s.linkedFieldId, reg);
+      if (!t) continue;
+      parts.push(
+        `(SELECT lt."${t.targetCol}" FROM ${t.join} j JOIN ${t.linkedSlug} lt ON lt.id = j.${t.other} ` +
+        `WHERE j.${t.self} = ${tableSlug}.id LIMIT 1) ${dir}`,
+      );
+      continue;
+    }
+    if (!field.columnName) continue;
     parts.push(`"${field.columnName}" ${dir}`);
   }
   return parts.length ? `ORDER BY ${parts.join(", ")}` : "";

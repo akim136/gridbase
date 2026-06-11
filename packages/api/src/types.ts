@@ -79,21 +79,39 @@ export interface ViewMeta {
 
 export interface FilterCondition {
   fieldId: string;
+  /** When `fieldId` is a link (or lookup) field, names the sub-field in the
+   *  linked table to compare on; defaults to the linked table's primary field. */
+  linkedFieldId?: string;
   op: "is" | "isNot" | "isEmpty" | "isNotEmpty" | "contains" | "gt" | "lt" | "before" | "after" | "anyOf";
   value?: unknown;
 }
 
-export interface FilterSpec {
+/** A one-level-deep AND/OR group; contains only leaf conditions. */
+export interface FilterGroup {
   conjunction: "and" | "or";
   conditions: FilterCondition[];
+}
+
+/** True when an item in a FilterSpec is a group (has nested conditions) rather
+ *  than a leaf condition (which carries an `op`). */
+export function isFilterGroup(item: FilterCondition | FilterGroup): item is FilterGroup {
+  return Array.isArray((item as FilterGroup).conditions);
+}
+
+export interface FilterSpec {
+  conjunction: "and" | "or";
+  /** Top-level items: leaf conditions and/or one-level groups. Old flat specs
+   *  (conditions only) remain valid. */
+  conditions: Array<FilterCondition | FilterGroup>;
 }
 
 export interface ViewConfig {
   fields?: Array<{ fieldId: string; width?: number }>;
   filters?: FilterSpec;
-  sorts?: Array<{ fieldId: string; direction?: "asc" | "desc" }>;
+  /** `linkedFieldId` sorts by a sub-field of the linked table (see FilterCondition). */
+  sorts?: Array<{ fieldId: string; linkedFieldId?: string; direction?: "asc" | "desc" }>;
   groupBy?: string;
-  kanban?: { stackFieldId: string };
+  kanban?: { stackFieldId: string; maxPreviewFields?: number };
   calendar?: { dateFieldId: string };
   form?: { title?: string; fieldIds: string[]; redirectMessage?: string };
   dashboard?: { dateFieldId: string; metricFieldIds: string[] };

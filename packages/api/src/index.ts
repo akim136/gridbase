@@ -30,6 +30,7 @@ import {
   type WriteInput,
 } from "./repo.js";
 import { createView, deleteView, updateView } from "./views.js";
+import { isFilterGroup } from "./types.js";
 import type { AggregateSpec, DashboardConfig, FilterSpec, Registry, ViewConfig } from "./types.js";
 
 export interface Env {
@@ -49,6 +50,7 @@ function authorized(request: Request, env: Env): boolean {
 
 const MAX_FILTER_CONDITIONS = 50;
 const MAX_ANYOF_VALUES = 500;
+const MAX_FILTER_GROUPS = 10;
 const MAX_WRITE_BATCH = 50;
 
 const json = (data: unknown, status = 200) =>
@@ -95,13 +97,49 @@ function parseAggregateSpec(url: URL): AggregateSpec {
   if (bucket) spec.bucket = bucket as AggregateSpec["bucket"];
   const filter = url.searchParams.get("filter");
   if (filter) {
+    let parsed: FilterSpec;
     try {
-      spec.filter = JSON.parse(filter) as FilterSpec;
+      parsed = JSON.parse(filter) as FilterSpec;
     } catch {
       throw new HttpError(400, "invalid filter param (expected JSON)");
     }
+    spec.filter = assertFilterBounds(parsed);
   }
   return spec;
+}
+
+/** Bound a filter spec so one request can't build a pathologically large query.
+ *  Caps total leaf conditions, group count, anyOf value lists, and nesting depth
+ *  (groups are one level deep — a group may not itself contain a group). */
+function assertFilterBounds(parsed: FilterSpec): FilterSpec {
+  const top = parsed.conditions ?? [];
+  let leafCount = 0;
+  let groupCount = 0;
+  const checkLeaf = (c: { value?: unknown }) => {
+    if (Array.isArray(c.value) && c.value.length > MAX_ANYOF_VALUES) {
+      throw new HttpError(400, `too many values in a condition (max ${MAX_ANYOF_VALUES})`);
+    }
+  };
+  for (const item of top) {
+    if (isFilterGroup(item)) {
+      groupCount++;
+      for (const inner of item.conditions ?? []) {
+        if (isFilterGroup(inner as never)) throw new HttpError(400, "filter groups may not be nested");
+        leafCount++;
+        checkLeaf(inner);
+      }
+    } else {
+      leafCount++;
+      checkLeaf(item);
+    }
+  }
+  if (leafCount > MAX_FILTER_CONDITIONS) {
+    throw new HttpError(400, `too many filter conditions (max ${MAX_FILTER_CONDITIONS})`);
+  }
+  if (groupCount > MAX_FILTER_GROUPS) {
+    throw new HttpError(400, `too many filter groups (max ${MAX_FILTER_GROUPS})`);
+  }
+  return parsed;
 }
 
 /** Parse list query params into ListOpts. filter is base64-encoded JSON. */
@@ -113,8 +151,14 @@ function parseListOpts(url: URL): ListOpts {
   const sort = url.searchParams.get("sort");
   if (sort) {
     opts.sorts = sort.split(",").filter(Boolean).map((s) => {
-      const [fieldId, dir] = s.split(":");
-      return { fieldId: fieldId!, direction: dir === "desc" ? "desc" : "asc" };
+      // Token shape: "fieldId[>linkedFieldId]:dir" — `>` selects a linked sub-field.
+      const [spec, dir] = s.split(":");
+      const [fieldId, linkedFieldId] = spec!.split(">");
+      return {
+        fieldId: fieldId!,
+        ...(linkedFieldId ? { linkedFieldId } : {}),
+        direction: dir === "desc" ? "desc" as const : "asc" as const,
+      };
     });
   }
 
@@ -127,17 +171,7 @@ function parseListOpts(url: URL): ListOpts {
     } catch {
       throw new HttpError(400, "invalid filter param (expected JSON)");
     }
-    // Bound the filter so one request can't build a pathologically large query.
-    const conditions = parsed.conditions ?? [];
-    if (conditions.length > MAX_FILTER_CONDITIONS) {
-      throw new HttpError(400, `too many filter conditions (max ${MAX_FILTER_CONDITIONS})`);
-    }
-    for (const c of conditions) {
-      if (Array.isArray(c.value) && c.value.length > MAX_ANYOF_VALUES) {
-        throw new HttpError(400, `too many values in a condition (max ${MAX_ANYOF_VALUES})`);
-      }
-    }
-    opts.filters = parsed;
+    opts.filters = assertFilterBounds(parsed);
   }
 
   const maxRecords = url.searchParams.get("maxRecords");
