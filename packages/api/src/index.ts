@@ -30,6 +30,7 @@ import {
   type WriteInput,
 } from "./repo.js";
 import { createView, deleteView, updateView } from "./views.js";
+import { isFilterGroup } from "./types.js";
 import type { AggregateSpec, DashboardConfig, FilterSpec, Registry, ViewConfig } from "./types.js";
 
 export interface Env {
@@ -107,16 +108,36 @@ function parseAggregateSpec(url: URL): AggregateSpec {
   return spec;
 }
 
-/** Bound a filter so one request can't build a pathologically large query. */
+/** Bound a filter spec so one request can't build a pathologically large query.
+ *  Caps total leaf conditions, group count, anyOf value lists, and nesting depth
+ *  (groups are one level deep — a group may not itself contain a group). */
 function assertFilterBounds(parsed: FilterSpec): FilterSpec {
-  const conditions = parsed.conditions ?? [];
-  if (conditions.length > MAX_FILTER_CONDITIONS) {
-    throw new HttpError(400, `too many filter conditions (max ${MAX_FILTER_CONDITIONS})`);
-  }
-  for (const c of conditions) {
+  const top = parsed.conditions ?? [];
+  let leafCount = 0;
+  let groupCount = 0;
+  const checkLeaf = (c: { value?: unknown }) => {
     if (Array.isArray(c.value) && c.value.length > MAX_ANYOF_VALUES) {
       throw new HttpError(400, `too many values in a condition (max ${MAX_ANYOF_VALUES})`);
     }
+  };
+  for (const item of top) {
+    if (isFilterGroup(item)) {
+      groupCount++;
+      for (const inner of item.conditions ?? []) {
+        if (isFilterGroup(inner as never)) throw new HttpError(400, "filter groups may not be nested");
+        leafCount++;
+        checkLeaf(inner);
+      }
+    } else {
+      leafCount++;
+      checkLeaf(item);
+    }
+  }
+  if (leafCount > MAX_FILTER_CONDITIONS) {
+    throw new HttpError(400, `too many filter conditions (max ${MAX_FILTER_CONDITIONS})`);
+  }
+  if (groupCount > MAX_FILTER_GROUPS) {
+    throw new HttpError(400, `too many filter groups (max ${MAX_FILTER_GROUPS})`);
   }
   return parsed;
 }
