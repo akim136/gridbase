@@ -34,7 +34,7 @@ export const getMeta = cache((): Promise<Meta> => call<Meta>("/v1/meta"));
 export interface ListParams {
   fields?: string[];
   filter?: object;
-  sort?: Array<{ fieldId: string; direction?: "asc" | "desc" }>;
+  sort?: Array<{ fieldId: string; linkedFieldId?: string; direction?: "asc" | "desc" }>;
   pageSize?: number;
   offset?: string;
 }
@@ -42,7 +42,15 @@ export interface ListParams {
 export function listRecords(tableId: string, params: ListParams = {}): Promise<ListResult> {
   const q = new URLSearchParams();
   if (params.fields?.length) q.set("fields", params.fields.join(","));
-  if (params.sort?.length) q.set("sort", params.sort.map((s) => `${s.fieldId}:${s.direction ?? "asc"}`).join(","));
+  // Sort token: "fieldId[>linkedFieldId]:dir" — `>` selects a linked sub-field.
+  if (params.sort?.length) {
+    q.set(
+      "sort",
+      params.sort
+        .map((s) => `${s.fieldId}${s.linkedFieldId ? `>${s.linkedFieldId}` : ""}:${s.direction ?? "asc"}`)
+        .join(","),
+    );
+  }
   // Plain JSON; URLSearchParams percent-encodes it (handles UTF-8 + +/&/= safely).
   if (params.filter) q.set("filter", JSON.stringify(params.filter));
   if (params.pageSize) q.set("pageSize", String(params.pageSize));

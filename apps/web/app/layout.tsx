@@ -4,8 +4,9 @@ import { Sidebar, type SidebarTable } from "@/components/Sidebar";
 import { getMeta } from "@/lib/server/gridApi";
 
 export const metadata: Metadata = {
-  title: "grid",
-  description: "Database-backed workspace (Airtable replacement)",
+  title: "gridbase",
+  description: "Database-backed workspace (open-source Airtable replacement)",
+  icons: { icon: "/icon.png" },
 };
 
 /** First non-hidden view for a table, by position. */

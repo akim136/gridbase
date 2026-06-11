@@ -35,7 +35,13 @@ export function KanbanView({
 
   if (!stackField || !stackId) return <p className="text-neutral-500">This Kanban view has no stack field configured.</p>;
 
-  const previewFields = fields.filter((f) => f.fieldId !== primaryId && f.fieldId !== stackId && f.type !== "link").slice(0, 3);
+  // Card fields follow the view's FieldEditor (show/hide/reorder) — the single
+  // source of truth — minus the stack (it's the column) and the primary (the
+  // card title). A soft cap (default 8) keeps cards readable.
+  const maxPreview = view.config.kanban?.maxPreviewFields ?? 8;
+  const previewFields = fields
+    .filter((f) => f.fieldId !== primaryId && f.fieldId !== stackId)
+    .slice(0, maxPreview);
   const columns = [
     ...(stackField.options?.choices?.map((c) => ({ id: c.name, label: c.name })) ?? []),
     { id: UNSET, label: "Uncategorized" },
@@ -75,6 +81,7 @@ export function KanbanView({
                   href={`/t/${view.tableId}/${view.viewId}/${rec.id}`}
                   primaryId={primaryId}
                   previewFields={previewFields}
+                  labels={labels}
                 />
               ))}
             </Column>
@@ -98,7 +105,19 @@ function Column({ id, label, count, children }: { id: string; label: string; cou
   );
 }
 
-function Card({ rec, href, primaryId, previewFields }: { rec: RecordEnvelope; href: string; primaryId?: string; previewFields: FieldMeta[] }) {
+/** Render a card-preview cell value: link/lookup arrays become comma-joined
+ *  labels (via the id→label map); scalars stringify. Returns "" when empty. */
+function previewValue(field: FieldMeta, value: unknown, labels: Map<string, string>): string {
+  if (value == null || value === "") return "";
+  if (field.type === "link") {
+    const ids = Array.isArray(value) ? (value as string[]) : [String(value)];
+    return ids.map((id) => labels.get(id) ?? id).join(", ");
+  }
+  if (Array.isArray(value)) return value.filter((v) => v != null && v !== "").map((v) => String(v)).join(", ");
+  return String(value);
+}
+
+function Card({ rec, href, primaryId, previewFields, labels }: { rec: RecordEnvelope; href: string; primaryId?: string; previewFields: FieldMeta[]; labels: Map<string, string> }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: rec.id });
   const style = transform ? { transform: `translate(${transform.x}px, ${transform.y}px)`, zIndex: 50 } : undefined;
   return (
@@ -113,11 +132,11 @@ function Card({ rec, href, primaryId, previewFields }: { rec: RecordEnvelope; hr
         {primaryId && rec.fields[primaryId] ? String(rec.fields[primaryId]) : "(untitled)"}
       </Link>
       {previewFields.map((f) => {
-        const v = rec.fields[f.fieldId];
-        if (v == null || v === "") return null;
+        const text = previewValue(f, rec.fields[f.fieldId], labels);
+        if (!text) return null;
         return (
           <div key={f.fieldId} className="truncate text-xs text-neutral-500">
-            <span className="text-neutral-400">{f.name}:</span> {String(v)}
+            <span className="text-neutral-400">{f.name}:</span> {text}
           </div>
         );
       })}

@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -29,6 +30,9 @@ export function Sidebar({ tables }: { tables: SidebarTable[] }) {
   if (collapsed) {
     return (
       <nav className="flex w-11 flex-shrink-0 flex-col items-center border-r border-surface-border bg-white py-3">
+        <Link href="/" title="gridbase" className="mb-1">
+          <Image src="/grid.png" alt="gridbase" width={28} height={28} className="rounded" />
+        </Link>
         <button onClick={toggle} title="Expand sidebar" className="rounded-md p-1.5 text-neutral-400 hover:bg-surface-muted hover:text-neutral-700">
           »
         </button>
@@ -68,9 +72,14 @@ export function Sidebar({ tables }: { tables: SidebarTable[] }) {
   return (
     <nav className="w-56 flex-shrink-0 border-r border-surface-border bg-white">
       <div className="flex items-start justify-between px-4 py-4">
-        <div>
-          <Link href="/" className="text-sm font-semibold tracking-tight text-neutral-900">gridbase</Link>
-          <p className="mt-0.5 text-[11px] text-neutral-400">workspace</p>
+        <div className="flex items-center gap-2">
+          <Link href="/" title="gridbase" className="flex-shrink-0">
+            <Image src="/grid.png" alt="gridbase" width={28} height={28} className="rounded" />
+          </Link>
+          <div>
+            <Link href="/" className="text-sm font-semibold tracking-tight text-neutral-900">gridbase</Link>
+            <p className="mt-0.5 text-[11px] text-neutral-400">workspace</p>
+          </div>
         </div>
         <button onClick={toggle} title="Collapse sidebar" className="rounded-md p-1 text-neutral-400 hover:bg-surface-muted hover:text-neutral-700">
           «
