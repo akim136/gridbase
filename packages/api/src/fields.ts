@@ -50,10 +50,17 @@ export async function createField(
     const r = options?.rollup;
     if (!r?.via || !r.agg) throw new HttpError(400, "rollup needs { via, agg }");
     const viaField = reg.fieldById.get(r.via);
-    if (!viaField || viaField.type !== "link") throw new HttpError(400, "rollup.via must be a link field on this table");
+    // Pin the reference chain: via must be a link ON THIS table, and the target a
+    // number field ON THE LINKED table — a dangling reference would make every
+    // subsequent read of this table throw when resolveRollups queries it.
+    if (!viaField || viaField.type !== "link" || viaField.tableId !== tableId) {
+      throw new HttpError(400, "rollup.via must be a link field on this table");
+    }
     if (r.agg !== "count") {
       const tf = r.target ? reg.fieldById.get(r.target) : undefined;
-      if (!tf?.columnName) throw new HttpError(400, "rollup needs a stored target field for sum/avg/min/max");
+      if (!tf?.columnName || tf.type !== "number" || tf.tableId !== viaField.options?.linkedTableId) {
+        throw new HttpError(400, "rollup target must be a number field on the linked table");
+      }
     }
   }
   if ((type === "select" || type === "multiselect") && !options) options = { choices: [] };

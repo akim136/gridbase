@@ -62,7 +62,9 @@ export default async function ViewPage({
         </div>
       </header>
 
-      <div className={`flex-1 p-5 ${view.type === "table" ? "overflow-hidden" : "overflow-auto"}`}>
+      {/* TableView (the table + detail fallthrough) owns its own scroll container,
+          so its wrapper must clip; every other view scrolls in the wrapper. */}
+      <div className={`flex-1 p-5 ${view.type === "table" || view.type === "detail" ? "overflow-hidden" : "overflow-auto"}`}>
         {view.type === "kanban" ? (
           <KanbanView meta={meta} view={view} records={records} labels={labels} />
         ) : view.type === "calendar" ? (

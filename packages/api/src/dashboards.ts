@@ -1,40 +1,14 @@
+import { type MetaDashboardRow, rowToDashboard } from "./meta.js";
 import { HttpError } from "./repo.js";
-import { isFilterGroup } from "./types.js";
+import { AGG_FNS, isFilterGroup } from "./types.js";
 import type { AggFn, DashboardConfig, DashboardMeta, FilterCondition, Registry, Widget } from "./types.js";
 
 const WIDGET_TYPES = new Set<Widget["type"]>(["kpi", "line", "bar", "table"]);
-const AGGS = new Set<AggFn>(["count", "sum", "avg", "min", "max"]);
+const AGGS = new Set<AggFn>(AGG_FNS);
 const MAX_WIDGETS = 50;
 
 function newDashboardId(): string {
   return "dsh" + crypto.randomUUID().replace(/-/g, "").slice(0, 14);
-}
-
-interface MetaDashboardRow {
-  dashboard_id: string;
-  workspace_id: string | null;
-  name: string;
-  position: number;
-  is_hidden: number;
-  config: string;
-}
-
-function rowToDashboard(r: MetaDashboardRow): DashboardMeta {
-  let config: DashboardConfig = { widgets: [] };
-  try {
-    const p = JSON.parse(r.config) as DashboardConfig;
-    if (p && Array.isArray(p.widgets)) config = p;
-  } catch {
-    /* keep default */
-  }
-  return {
-    dashboardId: r.dashboard_id,
-    workspaceId: r.workspace_id,
-    name: r.name,
-    position: r.position,
-    isHidden: r.is_hidden === 1,
-    config,
-  };
 }
 
 async function readDashboard(db: D1Database, id: string): Promise<DashboardMeta | null> {
@@ -49,7 +23,12 @@ function validateConfig(config: DashboardConfig | undefined, reg: Registry): Das
   const widgets = config?.widgets ?? [];
   if (!Array.isArray(widgets)) throw new HttpError(400, "config.widgets must be an array");
   if (widgets.length > MAX_WIDGETS) throw new HttpError(400, `too many widgets (max ${MAX_WIDGETS})`);
+  const seenIds = new Set<string>();
   for (const w of widgets) {
+    // widgetId keys the computed-data map and the React list — require + dedupe.
+    if (!w.widgetId || typeof w.widgetId !== "string") throw new HttpError(400, "every widget needs a widgetId");
+    if (seenIds.has(w.widgetId)) throw new HttpError(400, `duplicate widgetId: ${w.widgetId}`);
+    seenIds.add(w.widgetId);
     if (!WIDGET_TYPES.has(w.type)) throw new HttpError(400, `invalid widget type: ${w.type}`);
     if (!reg.tables.some((t) => t.tableId === w.tableId)) throw new HttpError(400, `widget references unknown table: ${w.tableId}`);
     const inTable = (fid?: string) => !fid || reg.fieldById.get(fid)?.tableId === w.tableId;
@@ -64,13 +43,18 @@ function validateConfig(config: DashboardConfig | undefined, reg: Registry): Das
       else leaves.push(item);
     }
     for (const c of leaves) if (!inTable(c.fieldId)) throw new HttpError(400, "widget filter field is not in its table");
-    // Fail fast on a widget that can't run: aggregates beyond count need a metric;
-    // charts need an x-axis.
-    if (w.type !== "table" && (w.agg ?? "count") !== "count" && !w.metricFieldId) {
-      throw new HttpError(400, `${w.agg} widget needs a metric field`);
+    // Fail fast on a widget that can't run, mirroring aggregate.ts's query-time
+    // rules so a stored widget always renders: non-count aggs need a numeric
+    // stored metric; charts need a stored-column x-axis.
+    if (w.type !== "table" && (w.agg ?? "count") !== "count") {
+      const mf = w.metricFieldId ? reg.fieldById.get(w.metricFieldId) : undefined;
+      if (!mf || mf.type !== "number" || !mf.columnName) {
+        throw new HttpError(400, `${w.agg} widget needs a numeric metric field`);
+      }
     }
-    if ((w.type === "line" || w.type === "bar") && !w.groupByFieldId) {
-      throw new HttpError(400, "chart widget needs a group-by field");
+    if (w.type === "line" || w.type === "bar") {
+      const gf = w.groupByFieldId ? reg.fieldById.get(w.groupByFieldId) : undefined;
+      if (!gf?.columnName) throw new HttpError(400, "chart widget needs a stored group-by field");
     }
   }
   return { widgets };
@@ -123,6 +107,9 @@ export async function updateDashboard(db: D1Database, reg: Registry, id: string,
     binds.push(input.isHidden ? 1 : 0);
   }
   if (input.position !== undefined) {
+    if (typeof input.position !== "number" || !Number.isFinite(input.position)) {
+      throw new HttpError(400, "position must be a number");
+    }
     sets.push("position = ?");
     binds.push(input.position);
   }

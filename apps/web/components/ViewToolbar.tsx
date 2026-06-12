@@ -78,6 +78,7 @@ function effectiveField(field: FieldMeta, linkedFieldId: string | undefined, met
 
 const btn = "rounded-md border border-surface-border px-2.5 py-1 text-xs text-neutral-600 hover:bg-surface-muted";
 const panel = "absolute z-40 mt-1 max-h-[70vh] w-[28rem] max-w-[calc(100vw-6rem)] overflow-auto rounded-lg border border-surface-border bg-white p-3 shadow-lg";
+const panelSm = "absolute z-40 mt-1 w-72 rounded-lg border border-surface-border bg-white p-3 shadow-lg";
 
 export function ViewToolbar({
   viewId,
@@ -94,7 +95,7 @@ export function ViewToolbar({
 }) {
   const router = useRouter();
   const [cfg, setCfg] = useState<ViewConfig>(config);
-  const [open, setOpen] = useState<null | "filter" | "sort" | "fields" | "freeze" | "kanban" | "calendar" | "gallery" | "gantt">(null);
+  const [open, setOpen] = useState<null | "filter" | "sort" | "fields" | "freeze" | "config">(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => setCfg(config), [config]);
@@ -122,6 +123,27 @@ export function ViewToolbar({
   const sorts = cfg.sorts ?? [];
   const hiddenCount = cfg.fields ? fields.length - cfg.fields.length : 0;
 
+  // Per-view-type config popover (one button + one panel; add new view types here).
+  const typeEditors: Record<string, { label: string; el: React.ReactNode }> = {
+    kanban: {
+      label: "Kanban",
+      el: <KanbanEditor stackFields={stackFields} kanban={cfg.kanban} onChange={(kanban) => save({ ...cfg, kanban })} />,
+    },
+    calendar: {
+      label: "Calendar",
+      el: <CalendarEditor dateFields={dateFields} calendar={cfg.calendar} onChange={(calendar) => save({ ...cfg, calendar })} />,
+    },
+    gallery: {
+      label: "Gallery",
+      el: <GalleryEditor urlFields={fields.filter((f) => f.type === "url")} gallery={cfg.gallery} onChange={(gallery) => save({ ...cfg, gallery })} />,
+    },
+    gantt: {
+      label: "Gantt",
+      el: <GanttEditor dateFields={dateFields} gantt={cfg.gantt} onChange={(gantt) => save({ ...cfg, gantt })} />,
+    },
+  };
+  const typeEditor = typeEditors[viewType];
+
   return (
     <div ref={ref} className="relative flex items-center gap-2 py-2">
       <button className={btn} onClick={() => setOpen(open === "filter" ? null : "filter")}>
@@ -136,24 +158,9 @@ export function ViewToolbar({
       <button className={btn} onClick={() => setOpen(open === "freeze" ? null : "freeze")}>
         Freeze
       </button>
-      {viewType === "kanban" ? (
-        <button className={btn} onClick={() => setOpen(open === "kanban" ? null : "kanban")}>
-          Kanban
-        </button>
-      ) : null}
-      {viewType === "calendar" ? (
-        <button className={btn} onClick={() => setOpen(open === "calendar" ? null : "calendar")}>
-          Calendar
-        </button>
-      ) : null}
-      {viewType === "gallery" ? (
-        <button className={btn} onClick={() => setOpen(open === "gallery" ? null : "gallery")}>
-          Gallery
-        </button>
-      ) : null}
-      {viewType === "gantt" ? (
-        <button className={btn} onClick={() => setOpen(open === "gantt" ? null : "gantt")}>
-          Gantt
+      {typeEditor ? (
+        <button className={btn} onClick={() => setOpen(open === "config" ? null : "config")}>
+          {typeEditor.label}
         </button>
       ) : null}
 
@@ -173,7 +180,7 @@ export function ViewToolbar({
         </div>
       ) : null}
       {open === "freeze" ? (
-        <div className="absolute z-40 mt-1 w-64 rounded-lg border border-surface-border bg-white p-3 shadow-lg" style={{ top: "100%", right: 0 }}>
+        <div className={`${panelSm} !w-64`} style={{ top: "100%", right: 0 }}>
           <FreezeEditor
             freezeHeader={cfg.freezeHeader !== false}
             frozen={cfg.frozen ?? 1}
@@ -182,43 +189,31 @@ export function ViewToolbar({
           />
         </div>
       ) : null}
-      {open === "kanban" ? (
-        <div className="absolute z-40 mt-1 w-72 rounded-lg border border-surface-border bg-white p-3 shadow-lg" style={{ top: "100%", right: 0 }}>
-          <KanbanEditor
-            stackFields={stackFields}
-            kanban={cfg.kanban}
-            onChange={(kanban) => save({ ...cfg, kanban })}
-          />
-        </div>
-      ) : null}
-      {open === "calendar" ? (
-        <div className="absolute z-40 mt-1 w-72 rounded-lg border border-surface-border bg-white p-3 shadow-lg" style={{ top: "100%", right: 0 }}>
-          <CalendarEditor
-            dateFields={dateFields}
-            calendar={cfg.calendar}
-            onChange={(calendar) => save({ ...cfg, calendar })}
-          />
-        </div>
-      ) : null}
-      {open === "gallery" ? (
-        <div className="absolute z-40 mt-1 w-72 rounded-lg border border-surface-border bg-white p-3 shadow-lg" style={{ top: "100%", right: 0 }}>
-          <GalleryEditor
-            urlFields={fields.filter((f) => f.type === "url")}
-            gallery={cfg.gallery}
-            onChange={(gallery) => save({ ...cfg, gallery })}
-          />
-        </div>
-      ) : null}
-      {open === "gantt" ? (
-        <div className="absolute z-40 mt-1 w-72 rounded-lg border border-surface-border bg-white p-3 shadow-lg" style={{ top: "100%", right: 0 }}>
-          <GanttEditor
-            dateFields={dateFields}
-            gantt={cfg.gantt}
-            onChange={(gantt) => save({ ...cfg, gantt })}
-          />
+      {open === "config" && typeEditor ? (
+        <div className={panelSm} style={{ top: "100%", right: 0 }}>
+          {typeEditor.el}
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Non-negative-integer input that commits on blur/Enter — no save per keystroke,
+ *  and clearing it restores the default (commits undefined). */
+function CountInput({ value, fallback, onCommit }: { value: number | undefined; fallback: number; onCommit: (n: number | undefined) => void }) {
+  return (
+    <input
+      type="number"
+      min={0}
+      className="w-16 rounded border border-surface-border px-1.5 py-0.5 text-sm"
+      defaultValue={value ?? fallback}
+      onBlur={(e) => {
+        const raw = e.target.value.trim();
+        const n = Math.max(0, Math.floor(Number(raw)));
+        onCommit(raw !== "" && Number.isFinite(n) ? n : undefined);
+      }}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+    />
   );
 }
 
@@ -249,13 +244,7 @@ function GalleryEditor({
       </div>
       <div className="flex items-center justify-between">
         <span className="text-xs text-neutral-600">Max card fields</span>
-        <input
-          type="number"
-          min={0}
-          className="w-16 rounded border border-surface-border px-1.5 py-0.5 text-sm"
-          value={gallery?.maxPreviewFields ?? 6}
-          onChange={(e) => onChange({ ...gallery, maxPreviewFields: Number(e.target.value) })}
-        />
+        <CountInput value={gallery?.maxPreviewFields} fallback={6} onCommit={(n) => onChange({ ...gallery, maxPreviewFields: n })} />
       </div>
       <p className="text-xs text-neutral-400">Use the <span className="font-medium">Fields</span> menu to choose which fields show on each card.</p>
     </div>
@@ -386,13 +375,7 @@ function KanbanEditor({
       </div>
       <div className="flex items-center justify-between">
         <span className="text-xs text-neutral-600">Max card fields</span>
-        <input
-          type="number"
-          min={0}
-          className="w-16 rounded border border-surface-border px-1.5 py-0.5 text-sm"
-          value={kanban?.maxPreviewFields ?? 8}
-          onChange={(e) => onChange({ ...kanban, stackFieldId, maxPreviewFields: Number(e.target.value) })}
-        />
+        <CountInput value={kanban?.maxPreviewFields} fallback={8} onCommit={(n) => onChange({ ...kanban, stackFieldId, maxPreviewFields: n })} />
       </div>
       {buckets.length ? (
         <div className="space-y-1">

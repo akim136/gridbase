@@ -85,11 +85,15 @@ export interface ViewConfig {
   frozen?: number;
 }
 
+/** Every view type the API accepts (mirror of @gridbase/api's VIEW_TYPES). */
+export const VIEW_TYPES = ["table", "kanban", "calendar", "form", "detail", "dashboard", "gallery", "gantt"] as const;
+export type ViewType = (typeof VIEW_TYPES)[number];
+
 export interface ViewMeta {
   viewId: string;
   tableId: string;
   name: string;
-  type: "table" | "kanban" | "calendar" | "form" | "detail" | "dashboard" | "gallery" | "gantt";
+  type: ViewType;
   position: number;
   isHidden: boolean;
   config: ViewConfig;

@@ -1,9 +1,10 @@
 import { buildWhere } from "./filter.js";
 import { HttpError } from "./repo.js";
+import { AGG_FNS } from "./types.js";
 import type { AggFn, AggregateSpec, Registry } from "./types.js";
 
 /** Aggregation functions (fixed allowlist — never interpolate user input). */
-const AGGS: Set<AggFn> = new Set(["count", "sum", "avg", "min", "max"]);
+const AGGS: Set<AggFn> = new Set(AGG_FNS);
 /** Date-bucket → strftime format (fixed allowlist; the key is validated, the
  *  value is a constant, so nothing user-controlled reaches the SQL). */
 const BUCKET_FMT: Record<string, string> = {

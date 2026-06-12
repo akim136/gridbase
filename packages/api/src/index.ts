@@ -253,7 +253,9 @@ export default {
       if (dm) {
         const dashboardId = decodeURIComponent(dm[1]!);
         if (request.method === "PATCH") {
-          const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+          // A parse failure must be a 400, not a silent no-op 200.
+          const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+          if (!body || typeof body !== "object") return json({ error: "invalid JSON body" }, 400);
           const dash = await updateDashboard(env.DB, reg, dashboardId, body);
           return json(dash);
         }

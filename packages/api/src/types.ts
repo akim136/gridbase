@@ -77,11 +77,16 @@ export interface TableMeta {
   sourceRef: string | null;
 }
 
+/** Every view type the API accepts — single source for the TS union and the
+ *  create-time allowlist in views.ts. */
+export const VIEW_TYPES = ["table", "kanban", "calendar", "form", "detail", "dashboard", "gallery", "gantt"] as const;
+export type ViewType = (typeof VIEW_TYPES)[number];
+
 export interface ViewMeta {
   viewId: string;
   tableId: string;
   name: string;
-  type: "table" | "kanban" | "calendar" | "form" | "detail" | "dashboard" | "gallery" | "gantt";
+  type: ViewType;
   position: number;
   isHidden: boolean;
   config: ViewConfig;
@@ -139,7 +144,10 @@ export interface Registry {
 
 // ---- dashboards: a workspace-level report composer -------------------------
 
-export type AggFn = "count" | "sum" | "avg" | "min" | "max";
+/** Aggregation functions — single source for the TS union and the allowlists in
+ *  aggregate.ts (query time) and dashboards.ts (write time). */
+export const AGG_FNS = ["count", "sum", "avg", "min", "max"] as const;
+export type AggFn = (typeof AGG_FNS)[number];
 export type DateBucket = "day" | "week" | "month" | "year";
 
 /** A grouped aggregation over one table: e.g. SUM(amount) GROUP BY month(close_date). */

@@ -4,10 +4,15 @@ import { fieldsForTable, type Meta, type RecordEnvelope, type ViewMeta } from "@
 const DAY = 86_400_000;
 const LABEL_W = 220; // fixed label column so track percentages line up
 
-/** Parse a stored date/datetime cell to a UTC ms timestamp, or null. */
+/** Parse a stored date/datetime cell to a UTC ms timestamp, or null. Zone-less
+ *  datetimes ("YYYY-MM-DD HH:MM[:SS]", as SQLite stores them) are pinned to UTC —
+ *  bare Date.parse would read them in the server's local zone, misaligning bars
+ *  against date-only values and the UTC-computed month ticks. */
 function toMs(v: unknown): number | null {
   if (v == null || v === "") return null;
-  const t = Date.parse(String(v));
+  let s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(s)) s = `${s.replace(" ", "T")}Z`;
+  const t = Date.parse(s);
   return Number.isFinite(t) ? t : null;
 }
 
@@ -36,17 +41,17 @@ export function GanttView({
     return <p className="text-neutral-500">This Gantt view has no start-date field configured. Use the Gantt menu to pick one.</p>;
   }
 
-  const bars = records
-    .map((rec) => {
-      const start = toMs(rec.fields[startId]);
-      if (start == null) return null;
-      const endRaw = endId ? toMs(rec.fields[endId]) : null;
-      const end = endRaw != null && endRaw > start ? endRaw : start + DAY;
-      return { rec, start, end };
-    })
-    .filter((b): b is { rec: RecordEnvelope; start: number; end: number } => b !== null)
-    .sort((a, b) => a.start - b.start);
-  const undated = records.filter((rec) => toMs(rec.fields[startId]) == null);
+  // One pass splits dated from undated, so the two can never disagree.
+  const bars: Array<{ rec: RecordEnvelope; start: number; end: number }> = [];
+  let undatedCount = 0;
+  for (const rec of records) {
+    const start = toMs(rec.fields[startId]);
+    if (start == null) { undatedCount++; continue; }
+    const endRaw = endId ? toMs(rec.fields[endId]) : null;
+    const end = endRaw != null && endRaw > start ? endRaw : start + DAY;
+    bars.push({ rec, start, end });
+  }
+  bars.sort((a, b) => a.start - b.start);
 
   if (bars.length === 0) {
     return <p className="py-8 text-center text-neutral-400">No records have a value in “{startField.name}”.</p>;
@@ -61,13 +66,18 @@ export function GanttView({
   const span = max - min;
   const pct = (t: number) => ((t - min) / span) * 100;
 
-  // Month boundaries inside the domain → header ticks + grid lines.
-  const ticks: Array<{ t: number; label: string }> = [];
+  // Month boundaries inside the domain → header ticks + grid lines. left% is
+  // row-invariant, so compute it once here rather than per row.
+  const ticks: Array<{ t: number; label: string; left: number }> = [];
   const d = new Date(min);
   d.setUTCDate(1); d.setUTCHours(0, 0, 0, 0);
   d.setUTCMonth(d.getUTCMonth() + 1);
   while (d.getTime() < max) {
-    ticks.push({ t: d.getTime(), label: d.toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }) });
+    ticks.push({
+      t: d.getTime(),
+      label: d.toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }),
+      left: pct(d.getTime()),
+    });
     d.setUTCMonth(d.getUTCMonth() + 1);
   }
 
@@ -82,7 +92,7 @@ export function GanttView({
         </div>
         <div className="relative h-6 flex-1">
           {ticks.map((tk) => (
-            <span key={tk.t} className="absolute top-1.5 -translate-x-1/2" style={{ left: `${pct(tk.t)}%` }}>
+            <span key={tk.t} className="absolute top-1.5 -translate-x-1/2" style={{ left: `${tk.left}%` }}>
               {tk.label}
             </span>
           ))}
@@ -99,7 +109,7 @@ export function GanttView({
             </div>
             <div className="relative h-6 flex-1">
               {ticks.map((tk) => (
-                <span key={tk.t} className="absolute inset-y-0 border-l border-surface-border/50" style={{ left: `${pct(tk.t)}%` }} />
+                <span key={tk.t} className="absolute inset-y-0 border-l border-surface-border/50" style={{ left: `${tk.left}%` }} />
               ))}
               <span
                 title={`${fmt(start)} → ${fmt(end)}`}
@@ -110,9 +120,9 @@ export function GanttView({
           </div>
         );
       })}
-      {undated.length > 0 ? (
+      {undatedCount > 0 ? (
         <p className="px-3 py-2 text-xs text-neutral-400">
-          {undated.length} record{undated.length === 1 ? "" : "s"} without “{startField.name}” not shown.
+          {undatedCount} record{undatedCount === 1 ? "" : "s"} without “{startField.name}” not shown.
         </p>
       ) : null}
     </div>

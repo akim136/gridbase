@@ -40,7 +40,10 @@ export function WidgetBuilder({ meta, initial, onSave, onClose }: { meta: Meta; 
 
   function save() {
     const title = w.title.trim() || defaultTitle(w, meta);
-    onSave({ ...w, title });
+    // Materialize the Bucket select's displayed default ("month") so the stored
+    // widget matches what the editor shows; clear it when grouping isn't a date.
+    const bucket = isChart && groupIsDate ? (w.bucket ?? "month") : undefined;
+    onSave({ ...w, title, bucket });
   }
 
   return (
@@ -63,7 +66,9 @@ export function WidgetBuilder({ meta, initial, onSave, onClose }: { meta: Meta; 
 
         <div className="space-y-3">
           <Row label="Table">
-            <select className={selectCls} value={w.tableId} onChange={(e) => set({ tableId: e.target.value, metricFieldId: undefined, groupByFieldId: undefined })}>
+            {/* Switching tables invalidates every field reference — clear them all,
+                or the server rejects the save (fields must belong to the table). */}
+            <select className={selectCls} value={w.tableId} onChange={(e) => set({ tableId: e.target.value, metricFieldId: undefined, groupByFieldId: undefined, fieldIds: undefined, filter: undefined })}>
               {meta.tables.map((t) => <option key={t.tableId} value={t.tableId}>{t.name}</option>)}
             </select>
           </Row>
