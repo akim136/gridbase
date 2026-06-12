@@ -3,7 +3,7 @@
 export type FieldType =
   | "text" | "longtext" | "number" | "date" | "datetime"
   | "select" | "multiselect" | "checkbox" | "url" | "email" | "json"
-  | "formula" | "link" | "lookup";
+  | "formula" | "link" | "lookup" | "rollup";
 
 export interface SelectChoice {
   id?: string;
@@ -23,6 +23,15 @@ export interface LookupSpec {
   target: string;
 }
 
+/** Rollup: aggregate `target` across the record(s) linked via the `via` link
+ *  field. `count` ignores `target` (counts linked rows); sum/avg/min/max read
+ *  the numeric `target` column. */
+export interface RollupSpec {
+  via: string;
+  target?: string;
+  agg: "count" | "sum" | "avg" | "min" | "max";
+}
+
 export interface LinkOptions {
   join: string;          // join-table name
   self: string;          // this row's endpoint column in the join table
@@ -35,6 +44,7 @@ export interface FieldOptions {
   choices?: SelectChoice[];
   formula?: FormulaSpec;
   lookup?: LookupSpec;
+  rollup?: RollupSpec;
   timezone?: string;
   // link options are flattened here too
   join?: string;
@@ -67,11 +77,16 @@ export interface TableMeta {
   sourceRef: string | null;
 }
 
+/** Every view type the API accepts — single source for the TS union and the
+ *  create-time allowlist in views.ts. */
+export const VIEW_TYPES = ["table", "kanban", "calendar", "form", "detail", "dashboard", "gallery", "gantt"] as const;
+export type ViewType = (typeof VIEW_TYPES)[number];
+
 export interface ViewMeta {
   viewId: string;
   tableId: string;
   name: string;
-  type: "table" | "kanban" | "calendar" | "form" | "detail" | "dashboard";
+  type: ViewType;
   position: number;
   isHidden: boolean;
   config: ViewConfig;
@@ -111,8 +126,21 @@ export interface ViewConfig {
   /** `linkedFieldId` sorts by a sub-field of the linked table (see FilterCondition). */
   sorts?: Array<{ fieldId: string; linkedFieldId?: string; direction?: "asc" | "desc" }>;
   groupBy?: string;
-  kanban?: { stackFieldId: string; maxPreviewFields?: number };
+  /** Table view: per-column footer aggregates, keyed by fieldId. */
+  summaries?: Record<string, "count" | "sum" | "avg" | "min" | "max">;
+  /** Table view: tint rows by this single-select field's value. */
+  colorBy?: string;
+  kanban?: {
+    stackFieldId: string;
+    maxPreviewFields?: number;
+    columnOrder?: string[];
+    collapsedColumns?: string[];
+    /** Sparse manual card order per column: listed ids first, rest in natural order. */
+    cardOrder?: Record<string, string[]>;
+  };
   calendar?: { dateFieldId: string };
+  gallery?: { coverFieldId?: string; maxPreviewFields?: number };
+  gantt?: { startFieldId: string; endFieldId?: string };
   form?: { title?: string; fieldIds: string[]; redirectMessage?: string };
   dashboard?: { dateFieldId: string; metricFieldIds: string[] };
 }
@@ -127,7 +155,10 @@ export interface Registry {
 
 // ---- dashboards: a workspace-level report composer -------------------------
 
-export type AggFn = "count" | "sum" | "avg" | "min" | "max";
+/** Aggregation functions — single source for the TS union and the allowlists in
+ *  aggregate.ts (query time) and dashboards.ts (write time). */
+export const AGG_FNS = ["count", "sum", "avg", "min", "max"] as const;
+export type AggFn = (typeof AGG_FNS)[number];
 export type DateBucket = "day" | "week" | "month" | "year";
 
 /** A grouped aggregation over one table: e.g. SUM(amount) GROUP BY month(close_date). */

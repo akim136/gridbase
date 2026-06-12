@@ -17,18 +17,42 @@ other open-source Airtable clones, which own their database.
 
 ## Features
 
-- **Views:** Table (inline-editable grid), Kanban (drag-to-restack), Calendar
-  (month grid, drag-to-reschedule), Detail panel, and Form (focused entry).
+- **Views:** Table (inline-editable grid), Kanban, Calendar (month grid,
+  drag-to-reschedule), Gallery (card grid with optional cover images), Gantt
+  (timeline bars from start/end date fields), Detail panel, and Form (focused
+  entry). Every view type has an in-toolbar config panel (stack field, date
+  field, cover field, start/end fields, …).
+- **Grid power features:** drag-to-resize and drag-to-reorder columns; grouped
+  rows with collapsible section headers; a per-column header menu (sort,
+  group-by, hide, color rows); a sticky summary footer (count / sum / avg /
+  min / max per column); row coloring by a select field; row selection with
+  bulk delete; cursor-key navigation with Enter-to-edit and ⌘C/⌘V clipboard;
+  a record **side-peek** drawer with inline editing; "Load more" pagination.
+- **Kanban power features:** drag cards between columns (writes the stack
+  field) and **reorder cards within a column** (persisted); per-column
+  quick-add; collapsible columns; custom column order; card preview fields
+  follow the shared field editor.
+- **Dashboards & reports:** a workspace-level report composer (`/d`) — KPI,
+  bar, line, and table widgets over any table, powered by a grouped-aggregation
+  endpoint with date bucketing; widgets are validated at write time.
 - **Relations:** linked records with searchable link pickers; click through to
   navigate; collapsible long link lists.
-- **Formulas & lookups:** declarative `sum` / `ratio` / `bucket` formulas computed
-  on read; lookups that pull a field across a link.
-- **Filters, sorts, freeze:** per-view saved filters, sorts, and field
-  show/hide/reorder; freeze header row and leading columns.
+- **Computed fields:** declarative `sum` / `ratio` / `bucket` formulas; lookups
+  that pull a field across a link; **rollups** (count / sum / avg / min / max
+  across a link) — all computed on read.
+- **Self-service schema:** add and delete fields from the UI (including a
+  rollup builder); stored fields get an additive `ALTER TABLE`, computed fields
+  are metadata-only.
+- **Filters, sorts, freeze:** per-view saved filters (with one-level AND/OR
+  groups), sorts (including by linked sub-fields), field show/hide/reorder;
+  freeze header row and leading columns.
 - **Editing:** inline cell editing per type, add/delete records, a new-record
   modal, and **CSV import** (column → field mapping, chunked create).
 - **Field types:** text, longtext, number, date, datetime, single/multi select,
-  checkbox, url, email, json, formula, link, lookup.
+  checkbox, url, email, json, formula, link, lookup, rollup.
+- **Mobile-aware:** dynamic-viewport layout, safe-area padding, wrapping
+  toolbars, viewport-clamped popovers, and a sidebar that collapses to an icon
+  rail and expands as an overlay on phones.
 - **Seams for production:** every entity table carries a nullable `workspace_id`
   (multi-tenant seam) and `meta_tables.source_kind` / `source_ref` (connector seam).
 
@@ -77,7 +101,8 @@ cd ../../apps/web && GRID_API_URL=http://localhost:8799 pnpm dev
 ```
 
 Open the web app and you'll see the demo CRM (Companies / Contacts / Deals) with
-Table, Kanban, and Calendar views.
+Table, Kanban, Calendar, Gallery, and Gantt views plus the dashboards composer
+at `/d`.
 
 To deploy, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 

@@ -1,26 +1,54 @@
+"use client";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { loadMoreRecords } from "@/app/t/[tableId]/[viewId]/actions";
+import { deleteRecords, updateRecord, updateViewConfig } from "@/lib/client";
 import { EditableCell } from "./EditableCell";
 import { AddRowButton } from "./RecordActions";
-import { linkPrimaries as buildLinkPrimaries, linkTargets as buildLinkTargets, type Meta, type RecordEnvelope, type ViewMeta, visibleFields } from "@/lib/types";
+import { linkPrimaries as buildLinkPrimaries, linkTargets as buildLinkTargets, fieldsForTable, type Meta, type RecordEnvelope, type ViewMeta, visibleFields } from "@/lib/types";
 
-const FROZEN_W = 200; // fixed width for frozen columns so left offsets are computable
+const DEFAULT_W = 200; // default column width (also the frozen-offset unit)
+const MIN_W = 80; // resize floor
+const CHECKBOX_W = 40; // leading selection column
 
 /**
  * Generic table/grid view. Header row freezes by default (stays visible scrolling
  * down); the first `config.frozen` columns freeze (stay visible scrolling right) —
  * both saved per view. The whole table is one scroll container so sticky works.
+ *
+ * Client component: it owns row selection (bulk delete) and cursor "load more"
+ * pagination, seeded from the server-rendered first page.
  */
 export function TableView({
   meta,
   view,
   records,
   labels,
+  initialOffset,
 }: {
   meta: Meta;
   view: ViewMeta;
   records: RecordEnvelope[];
   labels: Map<string, string>;
+  initialOffset?: string;
 }) {
+  const router = useRouter();
+  const [rows, setRows] = useState(records);
+  const [labelMap, setLabelMap] = useState(labels);
+  const [offset, setOffset] = useState(initialOffset);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [deleting, startDelete] = useTransition();
+
+  // A server refresh (e.g. after delete/edit) re-seeds from the fresh first page.
+  useEffect(() => {
+    setRows(records);
+    setLabelMap(labels);
+    setOffset(initialOffset);
+    setSelected(new Set());
+  }, [records, labels, initialOffset]);
+
   const targets = buildLinkTargets(meta);
   const primaries = buildLinkPrimaries(meta);
   const cols = visibleFields(meta, view);
@@ -28,79 +56,582 @@ export function TableView({
   const freezeHeader = view.config.freezeHeader !== false; // default on
   const frozen = view.config.frozen ?? 1; // default: freeze the first (record-name) column
 
-  const colStyle = (i: number): React.CSSProperties =>
-    i < frozen ? { position: "sticky", left: i * FROZEN_W, minWidth: FROZEN_W, width: FROZEN_W, maxWidth: FROZEN_W } : {};
+  // Column widths: saved per view in config.fields[].width; drag the header's
+  // right edge to resize (live local state, persisted on release).
+  const savedWidths = new Map((view.config.fields ?? []).filter((f) => f.width).map((f) => [f.fieldId, f.width!]));
+  const [widths, setWidths] = useState<Map<string, number>>(savedWidths);
+  useEffect(() => {
+    setWidths(new Map((view.config.fields ?? []).filter((f) => f.width).map((f) => [f.fieldId, f.width!])));
+  }, [view.config.fields]);
+  const widthOf = (fieldId: string) => widths.get(fieldId) ?? DEFAULT_W;
+  const drag = useRef<{ fieldId: string; startX: number; startW: number } | null>(null);
+
+  const onResizeStart = (fieldId: string, e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drag.current = { fieldId, startX: e.clientX, startW: widthOf(fieldId) };
+    const move = (ev: PointerEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      const w = Math.max(MIN_W, Math.round(d.startW + (ev.clientX - d.startX)));
+      setWidths((prev) => new Map(prev).set(d.fieldId, w));
+    };
+    const up = async (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const d = drag.current;
+      drag.current = null;
+      if (!d) return;
+      const w = Math.max(MIN_W, Math.round(d.startW + (ev.clientX - d.startX)));
+      // Persist: merge into the explicit field list (create one from the current
+      // visible order when the view doesn't pin fields yet).
+      const base = view.config.fields && view.config.fields.length
+        ? view.config.fields
+        : cols.map((f) => ({ fieldId: f.fieldId }));
+      const next = base.map((f) => (f.fieldId === d.fieldId ? { ...f, width: w } : f));
+      try {
+        await updateViewConfig(view.viewId, { ...view.config, fields: next });
+        router.refresh();
+      } catch (err) {
+        alert(`Resize save failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  // Frozen data columns sit to the right of the always-frozen checkbox column;
+  // their left offsets accumulate the actual widths of the frozen columns before them.
+  const frozenLeft = (i: number) => {
+    let left = CHECKBOX_W;
+    for (let j = 0; j < i; j++) left += widthOf(cols[j]!.fieldId);
+    return left;
+  };
+  const colStyle = (i: number): React.CSSProperties => {
+    const explicit = widths.get(cols[i]!.fieldId);
+    const w = explicit ?? DEFAULT_W;
+    // Frozen columns always need a fixed width (offsets depend on it); other
+    // columns stay auto-width until the user resizes them.
+    if (i < frozen) return { position: "sticky", left: frozenLeft(i), minWidth: w, width: w, maxWidth: w };
+    return explicit ? { minWidth: explicit, width: explicit, maxWidth: explicit } : {};
+  };
   const thStyle = (i: number): React.CSSProperties => ({
     ...(freezeHeader || i < frozen ? { position: "sticky" } : {}),
     ...(freezeHeader ? { top: 0 } : {}),
     ...colStyle(i),
     zIndex: freezeHeader && i < frozen ? 30 : freezeHeader ? 20 : i < frozen ? 10 : undefined,
   });
-  const tdStyle = (i: number): React.CSSProperties => (i < frozen ? { ...colStyle(i), zIndex: 10 } : {});
+  const tdStyle = (i: number): React.CSSProperties => (i < frozen ? { ...colStyle(i), zIndex: 10 } : colStyle(i));
+  // The selection column is always frozen at the far left.
+  const selStyle = (header: boolean): React.CSSProperties => ({
+    position: "sticky",
+    left: 0,
+    minWidth: CHECKBOX_W,
+    width: CHECKBOX_W,
+    ...(header && freezeHeader ? { top: 0 } : {}),
+    zIndex: header ? 30 : 11,
+  });
+
+  const allSelected = rows.length > 0 && selected.size === rows.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.id)));
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  // ---- column header menu (sort / group / hide without opening the toolbar) ----
+  const [headerMenu, setHeaderMenu] = useState<string | null>(null);
+  const [footerMenuOpen, setFooterMenuOpen] = useState<string | null>(null);
+  useEffect(() => {
+    if (!headerMenu && !footerMenuOpen) return;
+    const close = () => { setHeaderMenu(null); setFooterMenuOpen(null); };
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [headerMenu, footerMenuOpen]);
+  async function saveConfig(next: typeof view.config) {
+    try {
+      await updateViewConfig(view.viewId, next);
+      router.refresh();
+    } catch (e) {
+      alert(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const sortBy = (fieldId: string, direction: "asc" | "desc") =>
+    saveConfig({ ...view.config, sorts: [{ fieldId, direction }] });
+  const setSummary = (fieldId: string, agg: "count" | "sum" | "avg" | "min" | "max" | undefined) => {
+    const next = { ...(view.config.summaries ?? {}) };
+    if (agg) next[fieldId] = agg; else delete next[fieldId];
+    void saveConfig({ ...view.config, summaries: Object.keys(next).length ? next : undefined });
+  };
+  const colorBy = (fieldId: string | undefined) => saveConfig({ ...view.config, colorBy: fieldId });
+  const hideField = (fieldId: string) => {
+    const base = view.config.fields && view.config.fields.length
+      ? view.config.fields
+      : cols.map((f) => ({ fieldId: f.fieldId }));
+    saveConfig({ ...view.config, fields: base.filter((f) => f.fieldId !== fieldId) });
+  };
+  const groupByField = (fieldId: string | undefined) => saveConfig({ ...view.config, groupBy: fieldId });
+
+  // ---- keyboard navigation + clipboard --------------------------------------
+  // Click selects a cell (the cursor); arrows move it, Enter edits, Esc clears,
+  // ⌘/Ctrl+C copies the cell text, ⌘/Ctrl+V pastes into editable scalar fields.
+  const [cursor, setCursor] = useState<{ r: number; c: number } | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const PASTEABLE = new Set(["text", "longtext", "number", "select", "date", "datetime", "url", "email"]);
+
+  const cellEl = (r: number, c: number) =>
+    gridRef.current?.querySelector<HTMLElement>(`td[data-r="${r}"][data-c="${c}"]`) ?? null;
+
+  async function onGridKeyDown(e: React.KeyboardEvent) {
+    // Let an open editor (input/textarea/select) own the keyboard.
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    if (!cursor) return;
+    const move = (dr: number, dc: number) => {
+      e.preventDefault();
+      const r = Math.max(0, Math.min(rows.length - 1, cursor.r + dr));
+      const c = Math.max(0, Math.min(cols.length - 1, cursor.c + dc));
+      setCursor({ r, c });
+      cellEl(r, c)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+    if (e.key === "ArrowDown") return move(1, 0);
+    if (e.key === "ArrowUp") return move(-1, 0);
+    if (e.key === "ArrowRight") return move(0, 1);
+    if (e.key === "ArrowLeft") return move(0, -1);
+    if (e.key === "Escape") return setCursor(null);
+    if (e.key === "Enter") {
+      e.preventDefault();
+      // Open the cell's editor (or follow the primary link's behavior).
+      const el = cellEl(cursor.r, cursor.c);
+      el?.querySelector<HTMLElement>("div.cursor-text, button, a")?.click();
+      return;
+    }
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key === "c") {
+      const el = cellEl(cursor.r, cursor.c);
+      if (el) void navigator.clipboard.writeText(el.innerText.trim());
+      return;
+    }
+    if (mod && e.key === "v") {
+      const rec = flatRows[cursor.r];
+      const field = cols[cursor.c];
+      if (!rec || !field || field.fieldId === primaryId || !PASTEABLE.has(field.type)) return;
+      e.preventDefault();
+      try {
+        const text = (await navigator.clipboard.readText()).trim();
+        const value = field.type === "number" ? Number(text) : text;
+        if (field.type === "number" && !Number.isFinite(value as number)) return;
+        await updateRecord(view.tableId, rec.id, { [field.fieldId]: text === "" ? null : value });
+        router.refresh();
+      } catch (err) {
+        alert(`Paste failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  // ---- grouped rows: config.groupBy segments the loaded rows under section
+  // headers. Select fields keep their option order; other values sort naturally;
+  // the empty bucket renders last. ----
+  const groupField = view.config.groupBy ? cols.find((f) => f.fieldId === view.config.groupBy)
+    ?? visibleFields(meta, view).find((f) => f.fieldId === view.config.groupBy) : undefined;
+  const EMPTY = "__empty__";
+  let sections: Array<{ label: string; rows: RecordEnvelope[] }> | null = null;
+  if (groupField) {
+    const byVal = new Map<string, RecordEnvelope[]>();
+    for (const rec of rows) {
+      const v = rec.fields[groupField.fieldId];
+      const key = v == null || v === "" ? EMPTY : String(v);
+      const arr = byVal.get(key) ?? [];
+      arr.push(rec);
+      byVal.set(key, arr);
+    }
+    const choiceOrder = groupField.options?.choices?.map((c) => c.name) ?? [];
+    const keys = [...byVal.keys()].sort((a, b) => {
+      if (a === EMPTY) return 1;
+      if (b === EMPTY) return -1;
+      const ia = choiceOrder.indexOf(a), ib = choiceOrder.indexOf(b);
+      if (ia !== -1 || ib !== -1) return (ia === -1 ? 1e9 : ia) - (ib === -1 ? 1e9 : ib);
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+    sections = keys.map((k) => ({ label: k === EMPTY ? "(empty)" : k, rows: byVal.get(k)! }));
+  }
+  // Flat visual row order (sections concatenated) — the keyboard cursor's space.
+  const flatRows = sections ? sections.flatMap((s) => s.rows) : rows;
+  const rowIndex = new Map(flatRows.map((r, i) => [r.id, i]));
+
+  // ---- row coloring: tint each row by a select field's value ----
+  const PALETTE = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316"];
+  const colorField = view.config.colorBy ? cols.find((f) => f.fieldId === view.config.colorBy) : undefined;
+  const colorOf = (rec: RecordEnvelope): string | undefined => {
+    if (!colorField) return undefined;
+    const v = rec.fields[colorField.fieldId];
+    if (v == null || v === "") return undefined;
+    const choices = colorField.options?.choices ?? [];
+    const idx = choices.findIndex((c) => c.name === String(v));
+    return choices[idx]?.color ?? PALETTE[(idx + PALETTE.length) % PALETTE.length];
+  };
+
+  // ---- summary footer: per-column aggregates over the loaded rows ----
+  const summaries = view.config.summaries ?? {};
+  const summaryValue = (fieldId: string, agg: string): string => {
+    const vals = flatRows.map((r) => r.fields[fieldId]);
+    if (agg === "count") return String(vals.filter((v) => v != null && v !== "").length);
+    const nums = vals.map((v) => (typeof v === "number" ? v : Number(v))).filter((n) => Number.isFinite(n));
+    if (nums.length === 0) return "—";
+    const sum = nums.reduce((a, b) => a + b, 0);
+    const out = agg === "sum" ? sum : agg === "avg" ? sum / nums.length : agg === "min" ? Math.min(...nums) : Math.max(...nums);
+    return Number.isInteger(out) ? String(out) : out.toFixed(2);
+  };
+  
+  // ---- side peek: open a record in a slide-over without leaving the grid ----
+  const [peekId, setPeekId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!peekId) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPeekId(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [peekId]);
+  const peekRec = peekId ? rows.find((r) => r.id === peekId) : undefined;
+
+  async function onLoadMore() {
+    if (!offset) return;
+    setLoadingMore(true);
+    try {
+      const res = await loadMoreRecords(view.tableId, view.viewId, offset);
+      setRows((prev) => [...prev, ...res.records]);
+      setLabelMap((prev) => new Map([...prev, ...res.labels]));
+      setOffset(res.offset);
+    } catch (e) {
+      alert(`Load more failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  function onDeleteSelected() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (!window.confirm(`Delete ${ids.length} record${ids.length === 1 ? "" : "s"}? This can’t be undone.`)) return;
+    startDelete(async () => {
+      try {
+        await deleteRecords(view.tableId, ids);
+        setSelected(new Set());
+        router.refresh();
+      } catch (e) {
+        alert(`Delete failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    });
+  }
+
+  function renderRow(rec: RecordEnvelope) {
+    const checked = selected.has(rec.id);
+    const ri = rowIndex.get(rec.id)!;
+    const tint = colorOf(rec);
+    return (
+      <tr key={rec.id} className={`group border-b border-surface-border last:border-0 ${checked ? "bg-blue-50/40" : ""}`}>
+        <td
+          style={{ ...selStyle(false), ...(tint ? { boxShadow: `inset 3px 0 0 ${tint}` } : {}) }}
+          className="border-r border-surface-border bg-white px-2 py-2 align-top"
+        >
+          <input type="checkbox" aria-label="Select row" checked={checked} onChange={() => toggleOne(rec.id)} />
+        </td>
+        {cols.map((f, i) => {
+          const value = rec.fields[f.fieldId];
+          const isPrimary = f.fieldId === primaryId;
+          const focused = cursor?.r === ri && cursor.c === i;
+          return (
+            <td
+              key={f.fieldId}
+              data-r={ri}
+              data-c={i}
+              onMouseDown={() => setCursor({ r: ri, c: i })}
+              style={tdStyle(i)}
+              className={`px-3 py-2 align-top ${i < frozen ? "border-r border-surface-border bg-white" : "group-hover:bg-surface-muted/60"} ${focused ? "ring-2 ring-inset ring-blue-500" : ""}`}
+            >
+              {isPrimary ? (
+                <Link
+                  href={`/t/${view.tableId}/${view.viewId}/${rec.id}`}
+                  onClick={(e) => {
+                    // Plain click peeks; ⌘/Ctrl-click keeps the full-page behavior.
+                    if (e.metaKey || e.ctrlKey) return;
+                    e.preventDefault();
+                    setPeekId(rec.id);
+                  }}
+                  className="font-medium text-neutral-900 hover:text-blue-600 hover:underline"
+                >
+                  {value != null && value !== "" ? String(value) : "(untitled)"}
+                </Link>
+              ) : (
+                <EditableCell
+                  tableId={view.tableId}
+                  recordId={rec.id}
+                  field={f}
+                  value={value}
+                  labels={labelMap}
+                  linkTargets={targets}
+                  linkPrimaries={primaries}
+                />
+              )}
+            </td>
+          );
+        })}
+      </tr>
+    );
+  }
 
   return (
-    <div className="h-full overflow-auto rounded-lg border border-surface-border bg-white">
-      <table className="border-collapse text-sm">
-        <thead>
-          <tr className="text-left">
-            {cols.map((f, i) => (
-              <th
-                key={f.fieldId}
-                style={thStyle(i)}
-                className={`whitespace-nowrap border-b border-surface-border bg-surface-muted px-3 py-2 font-medium text-neutral-500 ${i < frozen ? "border-r" : ""}`}
-              >
-                {f.name}
-                {f.isComputed ? <span className="ml-1 text-[10px] text-neutral-400">ƒ</span> : null}
+    <div className="flex h-full flex-col">
+      {selected.size > 0 ? (
+        <div className="mb-2 flex items-center gap-3 rounded-lg border border-surface-border bg-surface-muted px-3 py-2 text-sm">
+          <span className="text-neutral-600">{selected.size} selected</span>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={onDeleteSelected}
+            className="rounded-md px-2.5 py-1 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            {deleting ? "Deleting…" : "Delete"}
+          </button>
+          <button type="button" className="text-xs text-neutral-400 hover:text-neutral-700" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      ) : null}
+      <div
+        ref={gridRef}
+        tabIndex={0}
+        onKeyDown={onGridKeyDown}
+        className="min-h-0 flex-1 overflow-auto rounded-lg border border-surface-border bg-white focus:outline-none"
+      >
+        <table className="border-collapse text-sm">
+          <thead>
+            <tr className="text-left">
+              <th style={selStyle(true)} className="border-b border-r border-surface-border bg-surface-muted px-2 py-2">
+                <input type="checkbox" aria-label="Select all" checked={allSelected} onChange={toggleAll} />
               </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {records.length === 0 ? (
-            <tr>
-              <td colSpan={cols.length} className="px-3 py-8 text-center text-neutral-400">No records.</td>
+              {cols.map((f, i) => (
+                <th
+                  key={f.fieldId}
+                  style={thStyle(i)}
+                  className={`group/th relative whitespace-nowrap border-b border-surface-border bg-surface-muted px-3 py-2 font-medium text-neutral-500 ${i < frozen ? "border-r" : ""}`}
+                >
+                  <span className="inline-block max-w-full overflow-hidden text-ellipsis align-bottom" style={{ maxWidth: "calc(100% - 1.25rem)" }}>
+                    {f.name}
+                    {f.isComputed ? <span className="ml-1 text-[10px] text-neutral-400">ƒ</span> : null}
+                  </span>
+                  {/* per-column menu: sort / group / hide without opening the toolbar */}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setHeaderMenu(headerMenu === f.fieldId ? null : f.fieldId); }}
+                    className="ml-0.5 rounded px-0.5 text-neutral-300 opacity-0 hover:bg-surface-border hover:text-neutral-600 focus:opacity-100 group-hover/th:opacity-100"
+                    aria-label={`${f.name} column menu`}
+                  >
+                    ▾
+                  </button>
+                  {headerMenu === f.fieldId ? (
+                    <span className="absolute left-1 top-full z-40 mt-0.5 block w-44 whitespace-normal rounded-lg border border-surface-border bg-white py-1 text-left font-normal shadow-lg" onClick={(e) => e.stopPropagation()}>
+                      {f.type !== "formula" && f.type !== "rollup" ? (
+                        <>
+                          <button className="block w-full px-3 py-1.5 text-left text-xs text-neutral-700 hover:bg-surface-muted" onClick={() => { setHeaderMenu(null); void sortBy(f.fieldId, "asc"); }}>Sort A → Z</button>
+                          <button className="block w-full px-3 py-1.5 text-left text-xs text-neutral-700 hover:bg-surface-muted" onClick={() => { setHeaderMenu(null); void sortBy(f.fieldId, "desc"); }}>Sort Z → A</button>
+                        </>
+                      ) : null}
+                      {!f.isComputed && f.type !== "link" ? (
+                        view.config.groupBy === f.fieldId ? (
+                          <button className="block w-full px-3 py-1.5 text-left text-xs text-neutral-700 hover:bg-surface-muted" onClick={() => { setHeaderMenu(null); void groupByField(undefined); }}>Ungroup</button>
+                        ) : (
+                          <button className="block w-full px-3 py-1.5 text-left text-xs text-neutral-700 hover:bg-surface-muted" onClick={() => { setHeaderMenu(null); void groupByField(f.fieldId); }}>Group by this field</button>
+                        )
+                      ) : null}
+                      {f.type === "select" ? (
+                        view.config.colorBy === f.fieldId ? (
+                          <button className="block w-full px-3 py-1.5 text-left text-xs text-neutral-700 hover:bg-surface-muted" onClick={() => { setHeaderMenu(null); void colorBy(undefined); }}>Clear row colors</button>
+                        ) : (
+                          <button className="block w-full px-3 py-1.5 text-left text-xs text-neutral-700 hover:bg-surface-muted" onClick={() => { setHeaderMenu(null); void colorBy(f.fieldId); }}>Color rows by this field</button>
+                        )
+                      ) : null}
+                      {f.fieldId !== primaryId ? (
+                        <button className="block w-full px-3 py-1.5 text-left text-xs text-neutral-700 hover:bg-surface-muted" onClick={() => { setHeaderMenu(null); void hideField(f.fieldId); }}>Hide field</button>
+                      ) : null}
+                    </span>
+                  ) : null}
+                  {/* drag the right edge to resize; persists to the view config */}
+                  <span
+                    onPointerDown={(e) => onResizeStart(f.fieldId, e)}
+                    className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize touch-none border-r-2 border-transparent hover:border-blue-400 group-hover/th:border-surface-border"
+                    aria-hidden
+                  />
+                </th>
+              ))}
             </tr>
-          ) : (
-            records.map((rec) => (
-              <tr key={rec.id} className="group border-b border-surface-border last:border-0">
-                {cols.map((f, i) => {
-                  const value = rec.fields[f.fieldId];
-                  const isPrimary = f.fieldId === primaryId;
-                  return (
-                    <td
-                      key={f.fieldId}
-                      style={tdStyle(i)}
-                      className={`px-3 py-2 align-top ${i < frozen ? "border-r border-surface-border bg-white" : "group-hover:bg-surface-muted/60"}`}
-                    >
-                      {isPrimary ? (
-                        <Link
-                          href={`/t/${view.tableId}/${view.viewId}/${rec.id}`}
-                          className="font-medium text-neutral-900 hover:text-blue-600 hover:underline"
-                        >
-                          {value != null && value !== "" ? String(value) : "(untitled)"}
-                        </Link>
-                      ) : (
-                        <EditableCell
-                          tableId={view.tableId}
-                          recordId={rec.id}
-                          field={f}
-                          value={value}
-                          labels={labels}
-                          linkTargets={targets}
-                          linkPrimaries={primaries}
-                        />
-                      )}
-                    </td>
-                  );
-                })}
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={cols.length + 1} className="px-3 py-8 text-center text-neutral-400">No records.</td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-      <div className="sticky left-0 border-t border-surface-border p-2">
-        <AddRowButton tableId={view.tableId} />
+            ) : sections ? (
+              sections.map((s) => (
+                <SectionRows
+                  key={s.label}
+                  label={s.label}
+                  count={s.rows.length}
+                  colCount={cols.length + 1}
+                  groupName={groupField!.name}
+                >
+                  {s.rows.map(renderRow)}
+                </SectionRows>
+              ))
+            ) : (
+              rows.map(renderRow)
+            )}
+          </tbody>
+          {/* Summary footer: click a cell to pick an aggregate (computed over the
+              loaded rows). Sticky so it stays visible while scrolling. */}
+          <tfoot>
+            <tr>
+              <td style={{ ...selStyle(false), bottom: 0, zIndex: 12 }} className="sticky border-t border-surface-border bg-surface-muted/90" />
+              {cols.map((f, i) => {
+                const agg = summaries[f.fieldId];
+                const numeric = f.type === "number" || f.type === "rollup";
+                return (
+                  <td
+                    key={f.fieldId}
+                    style={{ ...tdStyle(i), position: "sticky", bottom: 0, zIndex: i < frozen ? 12 : 11 }}
+                    className="relative border-t border-surface-border bg-surface-muted/90 px-3 py-1"
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setFooterMenuOpen(footerMenuOpen === f.fieldId ? null : f.fieldId); }}
+                      className={`w-full truncate text-left text-[11px] ${agg ? "font-medium text-neutral-700" : "text-neutral-300 hover:text-neutral-500"}`}
+                      title={agg ? `${agg} of ${f.name} (loaded rows)` : `Summarize ${f.name}`}
+                    >
+                      {agg ? `${agg === "count" ? "filled" : agg} ${summaryValue(f.fieldId, agg)}` : "Σ"}
+                    </button>
+                    {footerMenuOpen === f.fieldId ? (
+                      <span className="absolute bottom-full left-0 z-40 mb-1 block w-28 rounded-lg border border-surface-border bg-white py-1 shadow-lg" onClick={(e) => e.stopPropagation()}>
+                        {(numeric ? ["count", "sum", "avg", "min", "max"] : ["count"]).map((a) => (
+                          <button key={a} className="block w-full px-3 py-1 text-left text-xs text-neutral-700 hover:bg-surface-muted" onClick={() => { setFooterMenuOpen(null); setSummary(f.fieldId, a as "count"); }}>
+                            {a === "count" ? "filled count" : a}
+                          </button>
+                        ))}
+                        {agg ? (
+                          <button className="block w-full px-3 py-1 text-left text-xs text-neutral-400 hover:bg-surface-muted" onClick={() => { setFooterMenuOpen(null); setSummary(f.fieldId, undefined); }}>
+                            none
+                          </button>
+                        ) : null}
+                      </span>
+                    ) : null}
+                  </td>
+                );
+              })}
+            </tr>
+          </tfoot>
+        </table>
+        {/* Safe-area padding keeps Add/Load-more clear of mobile browser chrome. */}
+        <div className="sticky left-0 flex items-center gap-3 border-t border-surface-border p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <AddRowButton tableId={view.tableId} />
+          {offset ? (
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={onLoadMore}
+              className="rounded-md border border-surface-border px-3 py-1.5 text-sm text-neutral-600 hover:bg-surface-muted disabled:opacity-50"
+            >
+              {loadingMore ? "Loading…" : "Load more"}
+            </button>
+          ) : null}
+          <span className="text-xs text-neutral-400">{rows.length} loaded{offset ? "+" : ""}</span>
+        </div>
       </div>
+
+      {/* Side peek: edit a record in a slide-over without leaving the grid.
+          ⌘/Ctrl-click the record name still opens the full page. */}
+      {peekRec ? (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setPeekId(null)} aria-hidden />
+          <aside className="fixed inset-y-0 right-0 z-50 flex w-[30rem] max-w-[calc(100vw-2rem)] flex-col border-l border-surface-border bg-white shadow-xl">
+            <div className="flex items-center justify-between gap-2 border-b border-surface-border px-4 py-3">
+              <h2 className="min-w-0 truncate text-base font-semibold text-neutral-900">
+                {primaryId != null && peekRec.fields[primaryId] != null && peekRec.fields[primaryId] !== ""
+                  ? String(peekRec.fields[primaryId])
+                  : "(untitled)"}
+              </h2>
+              <div className="flex flex-shrink-0 items-center gap-2">
+                <Link
+                  href={`/t/${view.tableId}/${view.viewId}/${peekRec.id}`}
+                  className="rounded-md border border-surface-border px-2 py-1 text-xs text-neutral-600 hover:bg-surface-muted"
+                >
+                  Open full page →
+                </Link>
+                <button type="button" onClick={() => setPeekId(null)} className="rounded-md px-2 py-1 text-neutral-400 hover:bg-surface-muted hover:text-neutral-700" aria-label="Close">
+                  ✕
+                </button>
+              </div>
+            </div>
+            <dl className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+              {fieldsForTable(meta, view.tableId).map((f) => (
+                <div key={f.fieldId}>
+                  <dt className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                    {f.name}
+                    {f.isComputed ? <span className="ml-1 text-[10px] normal-case">ƒ</span> : null}
+                  </dt>
+                  <dd className="mt-0.5 text-sm">
+                    <EditableCell
+                      tableId={view.tableId}
+                      recordId={peekRec.id}
+                      field={f}
+                      value={peekRec.fields[f.fieldId]}
+                      labels={labelMap}
+                      linkTargets={targets}
+                      linkPrimaries={primaries}
+                    />
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </aside>
+        </>
+      ) : null}
     </div>
+  );
+}
+
+/** One group section: a sticky-left header row (value + count, click to
+ *  collapse/expand) followed by its record rows. */
+function SectionRows({
+  label,
+  count,
+  colCount,
+  groupName,
+  children,
+}: {
+  label: string;
+  count: number;
+  colCount: number;
+  groupName: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <tr className="border-b border-surface-border bg-surface-muted/70">
+        <td colSpan={colCount} className="px-0 py-0">
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="sticky left-0 flex max-w-[100vw] items-center gap-2 px-3 py-1.5 text-xs"
+            title={`${groupName}: ${label}`}
+          >
+            <span className="text-neutral-400">{open ? "▾" : "▸"}</span>
+            <span className="font-semibold text-neutral-700">{label}</span>
+            <span className="text-neutral-400">{count}</span>
+          </button>
+        </td>
+      </tr>
+      {open ? children : null}
+    </>
   );
 }

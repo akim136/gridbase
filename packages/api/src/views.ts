@@ -1,7 +1,8 @@
 import { HttpError } from "./repo.js";
+import { VIEW_TYPES as VIEW_TYPE_VALUES } from "./types.js";
 import type { Registry, ViewConfig, ViewMeta } from "./types.js";
 
-const VIEW_TYPES = new Set(["table", "kanban", "calendar", "form", "detail", "dashboard"]);
+const VIEW_TYPES = new Set<string>(VIEW_TYPE_VALUES);
 
 function newViewId(): string {
   return "viw" + crypto.randomUUID().replace(/-/g, "").slice(0, 14);

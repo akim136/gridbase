@@ -79,6 +79,23 @@ export function evalFormula(spec: FormulaSpec, row: Record<string, unknown>, reg
   }
 }
 
+/** Reduce a rollup's gathered numbers to a scalar. `count` is the value count;
+ *  empty input is 0 for every agg (no linked rows ⇒ 0). */
+export function aggregateRollup(agg: "count" | "sum" | "avg" | "min" | "max", nums: number[]): number {
+  if (agg === "count") return nums.length;
+  if (nums.length === 0) return 0;
+  switch (agg) {
+    case "sum": return nums.reduce((a, b) => a + b, 0);
+    case "avg": return nums.reduce((a, b) => a + b, 0) / nums.length;
+    case "min": return Math.min(...nums);
+    case "max": return Math.max(...nums);
+    default: {
+      const _never: never = agg;
+      throw new Error(`unknown rollup agg: ${JSON.stringify(_never)}`);
+    }
+  }
+}
+
 /**
  * Assemble one Airtable-shaped record from a raw entity row plus resolved link
  * arrays (fieldId → linked ids) and lookup arrays (fieldId → linked values).
@@ -91,6 +108,7 @@ export function assembleRecord(
   row: Record<string, unknown>,
   links: Map<string, string[]>,
   lookups: Map<string, unknown[]>,
+  rollups: Map<string, number>,
   reg: Registry,
   wanted?: Set<string>,
 ): RecordEnvelope {
@@ -105,6 +123,11 @@ export function assembleRecord(
     if (field.type === "lookup") {
       const vals = lookups.get(field.fieldId);
       if (vals && vals.length) out[field.fieldId] = vals;
+      continue;
+    }
+    if (field.type === "rollup") {
+      const n = rollups.get(field.fieldId);
+      if (n !== undefined) out[field.fieldId] = n;
       continue;
     }
     if (field.type === "formula") {

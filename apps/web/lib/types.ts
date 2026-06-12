@@ -3,7 +3,7 @@
 export type FieldType =
   | "text" | "longtext" | "number" | "date" | "datetime"
   | "select" | "multiselect" | "checkbox" | "url" | "email" | "json"
-  | "formula" | "link" | "lookup";
+  | "formula" | "link" | "lookup" | "rollup";
 
 export interface SelectChoice {
   id?: string;
@@ -14,6 +14,8 @@ export interface SelectChoice {
 export interface FieldOptions {
   choices?: SelectChoice[];
   formula?: unknown;
+  lookup?: unknown;
+  rollup?: unknown;
   timezone?: string;
   join?: string;
   self?: string;
@@ -72,8 +74,21 @@ export interface ViewConfig {
   };
   sorts?: Array<{ fieldId: string; linkedFieldId?: string; direction?: "asc" | "desc" }>;
   groupBy?: string;
-  kanban?: { stackFieldId: string; maxPreviewFields?: number };
+  /** Table view: per-column footer aggregates, keyed by fieldId. */
+  summaries?: Record<string, "count" | "sum" | "avg" | "min" | "max">;
+  /** Table view: tint rows by this single-select field's value. */
+  colorBy?: string;
+  kanban?: {
+    stackFieldId: string;
+    maxPreviewFields?: number;
+    columnOrder?: string[];
+    collapsedColumns?: string[];
+    /** Sparse manual card order per column: listed ids first, rest in natural order. */
+    cardOrder?: Record<string, string[]>;
+  };
   calendar?: { dateFieldId: string };
+  gallery?: { coverFieldId?: string; maxPreviewFields?: number };
+  gantt?: { startFieldId: string; endFieldId?: string };
   form?: { title?: string; fieldIds: string[]; redirectMessage?: string };
   dashboard?: { dateFieldId: string; metricFieldIds: string[] };
   /** Table view: freeze the header row (default true) + N leading columns (default 1). */
@@ -81,11 +96,15 @@ export interface ViewConfig {
   frozen?: number;
 }
 
+/** Every view type the API accepts (mirror of @gridbase/api's VIEW_TYPES). */
+export const VIEW_TYPES = ["table", "kanban", "calendar", "form", "detail", "dashboard", "gallery", "gantt"] as const;
+export type ViewType = (typeof VIEW_TYPES)[number];
+
 export interface ViewMeta {
   viewId: string;
   tableId: string;
   name: string;
-  type: "table" | "kanban" | "calendar" | "form" | "detail" | "dashboard";
+  type: ViewType;
   position: number;
   isHidden: boolean;
   config: ViewConfig;
@@ -130,6 +149,15 @@ export interface DashboardMeta {
 export interface AggregateRow {
   groupValue: string | null;
   value: number;
+}
+
+/** Server-computed data for one widget: rows for aggregates, records for table
+ *  widgets, or the error that kept it from loading. The contract between
+ *  computeWidgets (server) and DashboardWidget (client). */
+export interface WidgetResult {
+  rows?: AggregateRow[];
+  records?: RecordEnvelope[];
+  error?: string;
 }
 
 export interface RecordEnvelope {

@@ -82,7 +82,7 @@ export async function loadRegistry(db: D1Database): Promise<Registry> {
   return { ...schema, views, dashboards };
 }
 
-interface MetaDashboardRow {
+export interface MetaDashboardRow {
   dashboard_id: string;
   workspace_id: string | null;
   name: string;
@@ -91,16 +91,30 @@ interface MetaDashboardRow {
   config: string;
 }
 
-async function loadDashboards(db: D1Database): Promise<DashboardMeta[]> {
-  const res = await db.prepare("SELECT * FROM meta_dashboards ORDER BY position, name").all<MetaDashboardRow>();
-  return (res.results ?? []).map((r) => ({
+/** Canonical meta_dashboards row → DashboardMeta mapper (also used by the CRUD
+ *  module, so both read paths normalize a malformed config the same way). */
+export function rowToDashboard(r: MetaDashboardRow): DashboardMeta {
+  const parsed = parseJSON<DashboardConfig>(r.config, { widgets: [] });
+  return {
     dashboardId: r.dashboard_id,
     workspaceId: r.workspace_id,
     name: r.name,
     position: r.position,
     isHidden: r.is_hidden === 1,
-    config: parseJSON<DashboardConfig>(r.config, { widgets: [] }),
-  }));
+    config: Array.isArray(parsed.widgets) ? parsed : { widgets: [] },
+  };
+}
+
+async function loadDashboards(db: D1Database): Promise<DashboardMeta[]> {
+  try {
+    const res = await db.prepare("SELECT * FROM meta_dashboards ORDER BY position, name").all<MetaDashboardRow>();
+    return (res.results ?? []).map(rowToDashboard);
+  } catch (err) {
+    // Dashboards are optional: on a DB whose 0004 migration hasn't run yet
+    // (deploy-before-migrate), don't take every /v1 route down with them.
+    if (String(err).includes("no such table")) return [];
+    throw err;
+  }
 }
 
 async function loadViews(db: D1Database): Promise<ViewMeta[]> {

@@ -1,5 +1,5 @@
 "use client";
-import type { DashboardMeta, ViewConfig, ViewMeta, Widget } from "./types";
+import type { DashboardMeta, FieldMeta, FieldOptions, FieldType, ViewConfig, ViewMeta, Widget } from "./types";
 
 /**
  * Browser-side calls to the BFF (/api/grid/* → grid-api /v1/*). The Bearer
@@ -42,6 +42,14 @@ export const updateDashboard = (id: string, input: { name?: string; config?: { w
 
 export const deleteDashboard = (id: string) => call<{ deleted: boolean }>("DELETE", `dashboards/${id}`);
 
+// ---- field (schema) mutations ----
+
+export const createField = (tableId: string, input: { name: string; type: FieldType; options?: FieldOptions | null }) =>
+  call<FieldMeta>("POST", `tables/${tableId}/fields`, input);
+
+export const deleteField = (tableId: string, fieldId: string) =>
+  call<{ deleted: boolean; id: string }>("DELETE", `tables/${tableId}/fields/${encodeURIComponent(fieldId)}`);
+
 // ---- record mutations (typecast: true → resolve selects/links given by name) ----
 
 interface RecordResult {
@@ -60,6 +68,15 @@ export const createRecords = (tableId: string, rows: Array<Record<string, unknow
 
 export const deleteRecord = (tableId: string, id: string) =>
   call<{ records: Array<{ id: string; deleted: boolean }> }>("DELETE", `tables/${tableId}/records?records[]=${encodeURIComponent(id)}`);
+
+/** Batch-delete records, chunked to grid-api's MAX_WRITE_BATCH (50) per call. */
+export async function deleteRecords(tableId: string, ids: string[]): Promise<void> {
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    const qs = chunk.map((id) => `records[]=${encodeURIComponent(id)}`).join("&");
+    await call<{ records: Array<{ id: string; deleted: boolean }> }>("DELETE", `tables/${tableId}/records?${qs}`);
+  }
+}
 
 /** List a table's records (id + chosen fields) — used by the linked-record picker. */
 export const listRecords = (tableId: string, fields: string[]) =>

@@ -1,5 +1,5 @@
 import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Sidebar, type SidebarTable } from "@/components/Sidebar";
 import { getMeta } from "@/lib/server/gridApi";
 
@@ -32,7 +32,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en">
       <body>
-        <div className="flex h-screen overflow-hidden">
+        {/* h-dvh (not h-screen): the dynamic viewport excludes mobile browser
+            chrome, so bottom controls aren't hidden under the toolbar. */}
+        <div className="flex h-dvh overflow-hidden">
           {error ? null : <Sidebar tables={tables} />}
           <main className="flex-1 overflow-auto">
             {error ? (
