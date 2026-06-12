@@ -94,7 +94,7 @@ export function ViewToolbar({
 }) {
   const router = useRouter();
   const [cfg, setCfg] = useState<ViewConfig>(config);
-  const [open, setOpen] = useState<null | "filter" | "sort" | "fields" | "freeze" | "kanban" | "calendar">(null);
+  const [open, setOpen] = useState<null | "filter" | "sort" | "fields" | "freeze" | "kanban" | "calendar" | "gallery" | "gantt">(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => setCfg(config), [config]);
@@ -146,6 +146,16 @@ export function ViewToolbar({
           Calendar
         </button>
       ) : null}
+      {viewType === "gallery" ? (
+        <button className={btn} onClick={() => setOpen(open === "gallery" ? null : "gallery")}>
+          Gallery
+        </button>
+      ) : null}
+      {viewType === "gantt" ? (
+        <button className={btn} onClick={() => setOpen(open === "gantt" ? null : "gantt")}>
+          Gantt
+        </button>
+      ) : null}
 
       {open === "filter" ? (
         <div className={panel} style={{ top: "100%", right: 0 }}>
@@ -190,6 +200,108 @@ export function ViewToolbar({
           />
         </div>
       ) : null}
+      {open === "gallery" ? (
+        <div className="absolute z-40 mt-1 w-72 rounded-lg border border-surface-border bg-white p-3 shadow-lg" style={{ top: "100%", right: 0 }}>
+          <GalleryEditor
+            urlFields={fields.filter((f) => f.type === "url")}
+            gallery={cfg.gallery}
+            onChange={(gallery) => save({ ...cfg, gallery })}
+          />
+        </div>
+      ) : null}
+      {open === "gantt" ? (
+        <div className="absolute z-40 mt-1 w-72 rounded-lg border border-surface-border bg-white p-3 shadow-lg" style={{ top: "100%", right: 0 }}>
+          <GanttEditor
+            dateFields={dateFields}
+            gantt={cfg.gantt}
+            onChange={(gantt) => save({ ...cfg, gantt })}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Configure a Gallery view: an optional cover-image field (url) + how many
+ *  fields each card previews. Card field selection is the shared Fields editor. */
+function GalleryEditor({
+  urlFields,
+  gallery,
+  onChange,
+}: {
+  urlFields: FieldMeta[];
+  gallery: ViewConfig["gallery"];
+  onChange: (g: NonNullable<ViewConfig["gallery"]>) => void;
+}) {
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-neutral-600">Cover image field</label>
+        <select
+          className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
+          value={gallery?.coverFieldId ?? ""}
+          onChange={(e) => onChange({ ...gallery, coverFieldId: e.target.value || undefined })}
+        >
+          <option value="">None</option>
+          {urlFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
+        </select>
+        {urlFields.length === 0 ? <p className="text-[11px] text-neutral-400">Add a URL field to use card covers.</p> : null}
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-neutral-600">Max card fields</span>
+        <input
+          type="number"
+          min={0}
+          className="w-16 rounded border border-surface-border px-1.5 py-0.5 text-sm"
+          value={gallery?.maxPreviewFields ?? 6}
+          onChange={(e) => onChange({ ...gallery, maxPreviewFields: Number(e.target.value) })}
+        />
+      </div>
+      <p className="text-xs text-neutral-400">Use the <span className="font-medium">Fields</span> menu to choose which fields show on each card.</p>
+    </div>
+  );
+}
+
+/** Configure a Gantt view: the start (required) and end (optional) date fields
+ *  that define each record's bar. */
+function GanttEditor({
+  dateFields,
+  gantt,
+  onChange,
+}: {
+  dateFields: FieldMeta[];
+  gantt: ViewConfig["gantt"];
+  onChange: (g: NonNullable<ViewConfig["gantt"]>) => void;
+}) {
+  const startFieldId = gantt?.startFieldId ?? "";
+  if (dateFields.length === 0) {
+    return <p className="text-xs text-neutral-400">Add a date or date-&-time field to plot records on a timeline.</p>;
+  }
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-neutral-600">Start date field</label>
+        <select
+          className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
+          value={startFieldId}
+          onChange={(e) => onChange({ ...gantt, startFieldId: e.target.value })}
+        >
+          <option value="" disabled>Choose a field…</option>
+          {dateFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-neutral-600">End date field (optional)</label>
+        <select
+          className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
+          value={gantt?.endFieldId ?? ""}
+          onChange={(e) => onChange({ ...gantt, startFieldId, endFieldId: e.target.value || undefined })}
+        >
+          <option value="">None — 1-day bars</option>
+          {dateFields.filter((f) => f.fieldId !== startFieldId).map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
+        </select>
+      </div>
+      <p className="text-xs text-neutral-400">Each record renders a bar from start to end on a shared timeline.</p>
     </div>
   );
 }

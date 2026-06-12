@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { updateRecord } from "@/lib/client";
+import { previewValue } from "@/lib/preview";
 import { type FieldMeta, fieldsForTable, type Meta, type RecordEnvelope, type ViewMeta, visibleFields } from "@/lib/types";
 
 const UNSET = "__unset__";
@@ -112,18 +113,6 @@ function Column({ id, label, count, children }: { id: string; label: string; cou
       <div className="space-y-2">{children}</div>
     </div>
   );
-}
-
-/** Render a card-preview cell value: link/lookup arrays become comma-joined
- *  labels (via the id→label map); scalars stringify. Returns "" when empty. */
-function previewValue(field: FieldMeta, value: unknown, labels: Map<string, string>): string {
-  if (value == null || value === "") return "";
-  if (field.type === "link") {
-    const ids = Array.isArray(value) ? (value as string[]) : [String(value)];
-    return ids.map((id) => labels.get(id) ?? id).join(", ");
-  }
-  if (Array.isArray(value)) return value.filter((v) => v != null && v !== "").map((v) => String(v)).join(", ");
-  return String(value);
 }
 
 function Card({ rec, href, primaryId, previewFields, labels }: { rec: RecordEnvelope; href: string; primaryId?: string; previewFields: FieldMeta[]; labels: Map<string, string> }) {

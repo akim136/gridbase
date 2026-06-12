@@ -12,11 +12,13 @@ export interface SwitcherView {
   isHidden: boolean;
 }
 
-const TYPE_ICON: Record<string, string> = { table: "▦", kanban: "▤", calendar: "▥", form: "✎", detail: "❏", dashboard: "📊" };
+const TYPE_ICON: Record<string, string> = { table: "▦", kanban: "▤", calendar: "▥", form: "✎", detail: "❏", dashboard: "📊", gallery: "▣", gantt: "≡" };
 const ADDABLE = [
   { type: "table", label: "Grid" },
   { type: "kanban", label: "Kanban" },
   { type: "calendar", label: "Calendar" },
+  { type: "gallery", label: "Gallery" },
+  { type: "gantt", label: "Gantt" },
   { type: "form", label: "Form" },
   { type: "dashboard", label: "Dashboard" },
 ];

@@ -76,6 +76,8 @@ export interface ViewConfig {
   groupBy?: string;
   kanban?: { stackFieldId: string; maxPreviewFields?: number; columnOrder?: string[] };
   calendar?: { dateFieldId: string };
+  gallery?: { coverFieldId?: string; maxPreviewFields?: number };
+  gantt?: { startFieldId: string; endFieldId?: string };
   form?: { title?: string; fieldIds: string[]; redirectMessage?: string };
   dashboard?: { dateFieldId: string; metricFieldIds: string[] };
   /** Table view: freeze the header row (default true) + N leading columns (default 1). */
@@ -87,7 +89,7 @@ export interface ViewMeta {
   viewId: string;
   tableId: string;
   name: string;
-  type: "table" | "kanban" | "calendar" | "form" | "detail" | "dashboard";
+  type: "table" | "kanban" | "calendar" | "form" | "detail" | "dashboard" | "gallery" | "gantt";
   position: number;
   isHidden: boolean;
   config: ViewConfig;

@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { CalendarView } from "@/components/CalendarView";
 import { DashboardView } from "@/components/DashboardView";
 import { FormRenderer } from "@/components/FormRenderer";
+import { GalleryView } from "@/components/GalleryView";
+import { GanttView } from "@/components/GanttView";
 import { ImportButton } from "@/components/ImportDialog";
 import { KanbanView } from "@/components/KanbanView";
 import { NewRecordButton } from "@/components/NewRecordDialog";
@@ -60,11 +62,15 @@ export default async function ViewPage({
         </div>
       </header>
 
-      <div className={`flex-1 p-5 ${view.type === "kanban" || view.type === "calendar" || view.type === "form" || view.type === "dashboard" ? "overflow-auto" : "overflow-hidden"}`}>
+      <div className={`flex-1 p-5 ${view.type === "table" ? "overflow-hidden" : "overflow-auto"}`}>
         {view.type === "kanban" ? (
           <KanbanView meta={meta} view={view} records={records} labels={labels} />
         ) : view.type === "calendar" ? (
           <CalendarView meta={meta} view={view} records={records} />
+        ) : view.type === "gallery" ? (
+          <GalleryView meta={meta} view={view} records={records} labels={labels} />
+        ) : view.type === "gantt" ? (
+          <GanttView meta={meta} view={view} records={records} />
         ) : view.type === "form" ? (
           <FormRenderer tableId={tableId} fields={visibleFields(meta, view)} title={view.config.form?.title ?? view.name} />
         ) : view.type === "dashboard" ? (
