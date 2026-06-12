@@ -94,7 +94,7 @@ export function ViewToolbar({
 }) {
   const router = useRouter();
   const [cfg, setCfg] = useState<ViewConfig>(config);
-  const [open, setOpen] = useState<null | "filter" | "sort" | "fields" | "freeze" | "kanban">(null);
+  const [open, setOpen] = useState<null | "filter" | "sort" | "fields" | "freeze" | "kanban" | "calendar">(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => setCfg(config), [config]);
@@ -114,8 +114,10 @@ export function ViewToolbar({
   // Computed fields (formula/rollup) aren't sortable — they aren't stored columns.
   const filterable = fields.filter((f) => kindOf(f) !== null);
   const sortable = fields.filter((f) => f.type !== "formula" && f.type !== "rollup");
-  // Single-select fields are the valid Kanban grouping fields.
+  // Single-select fields are the valid Kanban grouping fields; date/datetime
+  // fields are the valid Calendar placement fields.
   const stackFields = fields.filter((f) => f.type === "select");
+  const dateFields = fields.filter((f) => f.type === "date" || f.type === "datetime");
   const conds = cfg.filters?.conditions ?? [];
   const sorts = cfg.sorts ?? [];
   const hiddenCount = cfg.fields ? fields.length - cfg.fields.length : 0;
@@ -137,6 +139,11 @@ export function ViewToolbar({
       {viewType === "kanban" ? (
         <button className={btn} onClick={() => setOpen(open === "kanban" ? null : "kanban")}>
           Kanban
+        </button>
+      ) : null}
+      {viewType === "calendar" ? (
+        <button className={btn} onClick={() => setOpen(open === "calendar" ? null : "calendar")}>
+          Calendar
         </button>
       ) : null}
 
@@ -174,6 +181,48 @@ export function ViewToolbar({
           />
         </div>
       ) : null}
+      {open === "calendar" ? (
+        <div className="absolute z-40 mt-1 w-72 rounded-lg border border-surface-border bg-white p-3 shadow-lg" style={{ top: "100%", right: 0 }}>
+          <CalendarEditor
+            dateFields={dateFields}
+            calendar={cfg.calendar}
+            onChange={(calendar) => save({ ...cfg, calendar })}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Configure a Calendar view: which date/datetime field places records on the
+ *  month grid. Mirrors the Kanban stack-field picker. */
+function CalendarEditor({
+  dateFields,
+  calendar,
+  onChange,
+}: {
+  dateFields: FieldMeta[];
+  calendar: ViewConfig["calendar"];
+  onChange: (c: NonNullable<ViewConfig["calendar"]>) => void;
+}) {
+  const dateFieldId = calendar?.dateFieldId ?? "";
+  if (dateFields.length === 0) {
+    return <p className="text-xs text-neutral-400">Add a date or date-&-time field to place records on a calendar.</p>;
+  }
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-neutral-600">Date field</label>
+        <select
+          className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
+          value={dateFieldId}
+          onChange={(e) => onChange({ dateFieldId: e.target.value })}
+        >
+          <option value="" disabled>Choose a field…</option>
+          {dateFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
+        </select>
+      </div>
+      <p className="text-xs text-neutral-400">Records appear on the month grid by this field. Drag an event to another day to update it.</p>
     </div>
   );
 }
