@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { previewValue } from "@/lib/preview";
+import { previewValue, recordTitle } from "@/lib/preview";
 import { type Meta, type RecordEnvelope, type ViewMeta, visibleFields } from "@/lib/types";
 
 /**
@@ -33,7 +33,6 @@ export function GalleryView({
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {records.map((rec) => {
         const cover = coverId ? rec.fields[coverId] : undefined;
-        const title = primaryId != null ? rec.fields[primaryId] : undefined;
         return (
           <Link
             key={rec.id}
@@ -45,9 +44,7 @@ export function GalleryView({
               <img src={cover} alt="" className="h-28 w-full border-b border-surface-border object-cover" />
             ) : null}
             <div className="p-3">
-              <p className="mb-1.5 truncate font-medium text-neutral-900">
-                {title != null && title !== "" ? String(title) : "(untitled)"}
-              </p>
+              <p className="mb-1.5 truncate font-medium text-neutral-900">{recordTitle(meta, view, rec)}</p>
               {cardFields.map((f) => {
                 const text = previewValue(f, rec.fields[f.fieldId], labels);
                 if (!text) return null;

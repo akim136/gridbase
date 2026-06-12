@@ -140,6 +140,15 @@ export interface AggregateRow {
   value: number;
 }
 
+/** Server-computed data for one widget: rows for aggregates, records for table
+ *  widgets, or the error that kept it from loading. The contract between
+ *  computeWidgets (server) and DashboardWidget (client). */
+export interface WidgetResult {
+  rows?: AggregateRow[];
+  records?: RecordEnvelope[];
+  error?: string;
+}
+
 export interface RecordEnvelope {
   id: string;
   createdTime: string;

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createView, deleteView, hideView, renameView } from "@/lib/client";
-import type { ViewConfig } from "@/lib/types";
+import { VIEW_TYPES, type ViewConfig, type ViewType } from "@/lib/types";
 
 export interface SwitcherView {
   viewId: string;
@@ -12,16 +12,21 @@ export interface SwitcherView {
   isHidden: boolean;
 }
 
-const TYPE_ICON: Record<string, string> = { table: "▦", kanban: "▤", calendar: "▥", form: "✎", detail: "❏", dashboard: "📊", gallery: "▣", gantt: "≡" };
-const ADDABLE = [
-  { type: "table", label: "Grid" },
-  { type: "kanban", label: "Kanban" },
-  { type: "calendar", label: "Calendar" },
-  { type: "gallery", label: "Gallery" },
-  { type: "gantt", label: "Gantt" },
-  { type: "form", label: "Form" },
-  { type: "dashboard", label: "Dashboard" },
-];
+// One registry per view type, keyed by the shared ViewType union — adding a view
+// type without an entry here is a compile error, so the icon/label/addable lists
+// can't silently drift. (detail is API-creatable but not offered in the menu.)
+const TYPE_INFO: Record<ViewType, { icon: string; label: string; addable: boolean }> = {
+  table: { icon: "▦", label: "Grid", addable: true },
+  kanban: { icon: "▤", label: "Kanban", addable: true },
+  calendar: { icon: "▥", label: "Calendar", addable: true },
+  gallery: { icon: "▣", label: "Gallery", addable: true },
+  gantt: { icon: "≡", label: "Gantt", addable: true },
+  form: { icon: "✎", label: "Form", addable: true },
+  dashboard: { icon: "📊", label: "Dashboard", addable: true },
+  detail: { icon: "❏", label: "Detail", addable: false },
+};
+const ADDABLE = VIEW_TYPES.filter((t) => TYPE_INFO[t].addable).map((type) => ({ type, label: TYPE_INFO[type].label }));
+const iconOf = (type: string): string => TYPE_INFO[type as ViewType]?.icon ?? "▦";
 
 /** Tabs across a table's views + a manager (add / rename / duplicate / hide / delete). */
 export function ViewSwitcher({
@@ -100,7 +105,7 @@ export function ViewSwitcher({
                 active ? "border-blue-600 font-medium text-blue-700" : "border-transparent text-neutral-500 hover:text-neutral-800"
               }`}
             >
-              <span className="text-xs">{TYPE_ICON[v.type] ?? "▦"}</span>
+              <span className="text-xs">{iconOf(v.type)}</span>
               {v.name}
             </Link>
             {active ? (
@@ -117,7 +122,7 @@ export function ViewSwitcher({
           <p className="px-3 py-1 text-[10px] uppercase tracking-wide text-neutral-400">Add view</p>
           {ADDABLE.map((a) => (
             <button key={a.type} className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-neutral-700 hover:bg-surface-muted" onClick={() => add(a.type)}>
-              <span className="text-xs">{TYPE_ICON[a.type]}</span>{a.label}
+              <span className="text-xs">{iconOf(a.type)}</span>{a.label}
             </button>
           ))}
         </div>

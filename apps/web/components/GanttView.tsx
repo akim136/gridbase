@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { recordTitle } from "@/lib/preview";
 import { fieldsForTable, type Meta, type RecordEnvelope, type ViewMeta } from "@/lib/types";
 
 const DAY = 86_400_000;
@@ -35,7 +36,6 @@ export function GanttView({
   const endId = view.config.gantt?.endFieldId;
   const fields = fieldsForTable(meta, view.tableId);
   const startField = fields.find((f) => f.fieldId === startId);
-  const primaryId = meta.tables.find((t) => t.tableId === view.tableId)?.primaryFieldId;
 
   if (!startField || !startId) {
     return <p className="text-neutral-500">This Gantt view has no start-date field configured. Use the Gantt menu to pick one.</p>;
@@ -99,12 +99,11 @@ export function GanttView({
         </div>
       </div>
       {bars.map(({ rec, start, end }) => {
-        const title = primaryId != null ? rec.fields[primaryId] : undefined;
         return (
           <div key={rec.id} className="group flex items-center border-b border-surface-border/60 last:border-0 hover:bg-surface-muted/40">
             <div className="flex-shrink-0 truncate px-3 py-1.5 text-xs" style={{ width: LABEL_W }}>
               <Link href={`/t/${view.tableId}/${view.viewId}/${rec.id}`} className="text-neutral-800 hover:text-blue-600 hover:underline">
-                {title != null && title !== "" ? String(title) : "(untitled)"}
+                {recordTitle(meta, view, rec)}
               </Link>
             </div>
             <div className="relative h-6 flex-1">

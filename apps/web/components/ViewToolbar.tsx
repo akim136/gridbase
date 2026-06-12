@@ -217,6 +217,37 @@ function CountInput({ value, fallback, onCommit }: { value: number | undefined; 
   );
 }
 
+/** Labeled single-field picker shared by the view-type config editors. With
+ *  `none` set, an empty choice (labelled by it) maps to undefined; otherwise the
+ *  placeholder is a disabled "Choose a field…". */
+function FieldSelect({
+  label,
+  fields,
+  value,
+  none,
+  onChange,
+}: {
+  label: string;
+  fields: FieldMeta[];
+  value: string;
+  none?: string;
+  onChange: (fieldId: string | undefined) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="text-xs font-medium text-neutral-600">{label}</label>
+      <select
+        className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
+        value={value}
+        onChange={(e) => onChange(e.target.value || undefined)}
+      >
+        {none != null ? <option value="">{none}</option> : <option value="" disabled>Choose a field…</option>}
+        {fields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
+      </select>
+    </div>
+  );
+}
+
 /** Configure a Gallery view: an optional cover-image field (url) + how many
  *  fields each card previews. Card field selection is the shared Fields editor. */
 function GalleryEditor({
@@ -230,18 +261,8 @@ function GalleryEditor({
 }) {
   return (
     <div className="space-y-3 text-sm">
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-neutral-600">Cover image field</label>
-        <select
-          className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
-          value={gallery?.coverFieldId ?? ""}
-          onChange={(e) => onChange({ ...gallery, coverFieldId: e.target.value || undefined })}
-        >
-          <option value="">None</option>
-          {urlFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
-        </select>
-        {urlFields.length === 0 ? <p className="text-[11px] text-neutral-400">Add a URL field to use card covers.</p> : null}
-      </div>
+      <FieldSelect label="Cover image field" fields={urlFields} value={gallery?.coverFieldId ?? ""} none="None" onChange={(coverFieldId) => onChange({ ...gallery, coverFieldId })} />
+      {urlFields.length === 0 ? <p className="text-[11px] text-neutral-400">Add a URL field to use card covers.</p> : null}
       <div className="flex items-center justify-between">
         <span className="text-xs text-neutral-600">Max card fields</span>
         <CountInput value={gallery?.maxPreviewFields} fallback={6} onCommit={(n) => onChange({ ...gallery, maxPreviewFields: n })} />
@@ -268,28 +289,14 @@ function GanttEditor({
   }
   return (
     <div className="space-y-3 text-sm">
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-neutral-600">Start date field</label>
-        <select
-          className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
-          value={startFieldId}
-          onChange={(e) => onChange({ ...gantt, startFieldId: e.target.value })}
-        >
-          <option value="" disabled>Choose a field…</option>
-          {dateFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
-        </select>
-      </div>
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-neutral-600">End date field (optional)</label>
-        <select
-          className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
-          value={gantt?.endFieldId ?? ""}
-          onChange={(e) => onChange({ ...gantt, startFieldId, endFieldId: e.target.value || undefined })}
-        >
-          <option value="">None — 1-day bars</option>
-          {dateFields.filter((f) => f.fieldId !== startFieldId).map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
-        </select>
-      </div>
+      <FieldSelect label="Start date field" fields={dateFields} value={startFieldId} onChange={(id) => onChange({ ...gantt, startFieldId: id ?? "" })} />
+      <FieldSelect
+        label="End date field (optional)"
+        fields={dateFields.filter((f) => f.fieldId !== startFieldId)}
+        value={gantt?.endFieldId ?? ""}
+        none="None — 1-day bars"
+        onChange={(endFieldId) => onChange({ ...gantt, startFieldId, endFieldId })}
+      />
       <p className="text-xs text-neutral-400">Each record renders a bar from start to end on a shared timeline.</p>
     </div>
   );
@@ -312,17 +319,7 @@ function CalendarEditor({
   }
   return (
     <div className="space-y-3 text-sm">
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-neutral-600">Date field</label>
-        <select
-          className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
-          value={dateFieldId}
-          onChange={(e) => onChange({ dateFieldId: e.target.value })}
-        >
-          <option value="" disabled>Choose a field…</option>
-          {dateFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
-        </select>
-      </div>
+      <FieldSelect label="Date field" fields={dateFields} value={dateFieldId} onChange={(id) => onChange({ dateFieldId: id ?? "" })} />
       <p className="text-xs text-neutral-400">Records appear on the month grid by this field. Drag an event to another day to update it.</p>
     </div>
   );
@@ -361,18 +358,8 @@ function KanbanEditor({
 
   return (
     <div className="space-y-3 text-sm">
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-neutral-600">Stack by</label>
-        <select
-          className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
-          value={stackFieldId}
-          // Changing the field invalidates the old field's column order.
-          onChange={(e) => onChange({ ...kanban, stackFieldId: e.target.value, columnOrder: undefined })}
-        >
-          <option value="" disabled>Choose a field…</option>
-          {stackFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
-        </select>
-      </div>
+      {/* Changing the field invalidates the old field's column order. */}
+      <FieldSelect label="Stack by" fields={stackFields} value={stackFieldId} onChange={(id) => onChange({ ...kanban, stackFieldId: id ?? "", columnOrder: undefined })} />
       <div className="flex items-center justify-between">
         <span className="text-xs text-neutral-600">Max card fields</span>
         <CountInput value={kanban?.maxPreviewFields} fallback={8} onCommit={(n) => onChange({ ...kanban, stackFieldId, maxPreviewFields: n })} />

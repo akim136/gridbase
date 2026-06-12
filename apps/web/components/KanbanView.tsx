@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { updateRecord } from "@/lib/client";
-import { previewValue } from "@/lib/preview";
+import { previewValue, recordTitle } from "@/lib/preview";
 import { type FieldMeta, fieldsForTable, type Meta, type RecordEnvelope, type ViewMeta, visibleFields } from "@/lib/types";
 
 const UNSET = "__unset__";
@@ -89,7 +89,7 @@ export function KanbanView({
                   key={rec.id}
                   rec={rec}
                   href={`/t/${view.tableId}/${view.viewId}/${rec.id}`}
-                  primaryId={primaryId}
+                  title={recordTitle(meta, view, rec)}
                   previewFields={previewFields}
                   labels={labels}
                 />
@@ -115,7 +115,7 @@ function Column({ id, label, count, children }: { id: string; label: string; cou
   );
 }
 
-function Card({ rec, href, primaryId, previewFields, labels }: { rec: RecordEnvelope; href: string; primaryId?: string; previewFields: FieldMeta[]; labels: Map<string, string> }) {
+function Card({ rec, href, title, previewFields, labels }: { rec: RecordEnvelope; href: string; title: string; previewFields: FieldMeta[]; labels: Map<string, string> }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: rec.id });
   const style = transform ? { transform: `translate(${transform.x}px, ${transform.y}px)`, zIndex: 50 } : undefined;
   return (
@@ -127,7 +127,7 @@ function Card({ rec, href, primaryId, previewFields, labels }: { rec: RecordEnve
       className={`rounded-lg border border-surface-border bg-white p-3 shadow-sm ${isDragging ? "opacity-60" : "hover:border-blue-300"}`}
     >
       <Link href={href} className="mb-1 block font-medium text-neutral-900" onClick={(e) => isDragging && e.preventDefault()}>
-        {primaryId && rec.fields[primaryId] ? String(rec.fields[primaryId]) : "(untitled)"}
+        {title}
       </Link>
       {previewFields.map((f) => {
         const text = previewValue(f, rec.fields[f.fieldId], labels);

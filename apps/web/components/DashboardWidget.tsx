@@ -1,17 +1,13 @@
 "use client";
 import dynamic from "next/dynamic";
 import { previewValue } from "@/lib/preview";
-import type { AggregateRow, Meta, RecordEnvelope, Widget } from "@/lib/types";
+import { fieldsForTable, type Meta, type Widget, type WidgetResult } from "@/lib/types";
 
 // recharts is client-only — load the chart pieces without SSR.
 const MetricChart = dynamic(() => import("./MetricChart").then((m) => m.MetricChart), { ssr: false });
 const BarMini = dynamic(() => import("./BarMini").then((m) => m.BarMini), { ssr: false });
 
-export interface WidgetResult {
-  rows?: AggregateRow[];
-  records?: RecordEnvelope[];
-  error?: string;
-}
+export type { WidgetResult } from "@/lib/types";
 
 function fmtNum(v: number): string {
   if (!Number.isFinite(v)) return "—";
@@ -47,14 +43,13 @@ export function DashboardWidget({ widget, meta, result }: { widget: Widget; meta
     return data.length ? <div className="h-40"><BarMini data={data} /></div> : <Empty>No data</Empty>;
   }
 
-  // table — resolve column field ids to FieldMeta once (unknown ids are dropped:
-  // they can't be labeled or rendered meaningfully).
+  // table — resolve column field ids to FieldMeta once, scoped to the widget's
+  // table and in position order (unknown ids are dropped: they can't be labeled
+  // or rendered meaningfully).
   const records = result?.records ?? [];
-  const fieldById = new Map(meta.fields.map((f) => [f.fieldId, f]));
-  const colIds =
-    widget.fieldIds && widget.fieldIds.length
-      ? widget.fieldIds
-      : meta.fields.filter((f) => f.tableId === widget.tableId).slice(0, 4).map((f) => f.fieldId);
+  const tableFields = fieldsForTable(meta, widget.tableId);
+  const fieldById = new Map(tableFields.map((f) => [f.fieldId, f]));
+  const colIds = widget.fieldIds && widget.fieldIds.length ? widget.fieldIds : tableFields.slice(0, 4).map((f) => f.fieldId);
   const cols = colIds.map((c) => fieldById.get(c)).filter((f): f is NonNullable<typeof f> => Boolean(f));
   if (!records.length) return <Empty>No rows</Empty>;
   return (

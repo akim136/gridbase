@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import type { AggregateRow, ListResult, Meta, RecordEnvelope, Widget } from "../types";
+import type { AggregateRow, ListResult, Meta, RecordEnvelope, Widget, WidgetResult } from "../types";
 
 /**
  * Server-only client for grid-api. Server Components call this directly (the
@@ -79,9 +79,7 @@ export function getAggregate(
 /** Compute every widget's data server-side (secret stays on the server). Returns a
  *  map widgetId → result, tolerating a single widget's failure (so one bad widget
  *  can't blank the whole dashboard). */
-export async function computeWidgets(
-  widgets: Widget[],
-): Promise<Record<string, { rows?: AggregateRow[]; records?: RecordEnvelope[]; error?: string }>> {
+export async function computeWidgets(widgets: Widget[]): Promise<Record<string, WidgetResult>> {
   const entries = await Promise.all(
     widgets.map(async (w) => {
       try {
