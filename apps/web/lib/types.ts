@@ -74,7 +74,7 @@ export interface ViewConfig {
   };
   sorts?: Array<{ fieldId: string; linkedFieldId?: string; direction?: "asc" | "desc" }>;
   groupBy?: string;
-  kanban?: { stackFieldId: string; maxPreviewFields?: number };
+  kanban?: { stackFieldId: string; maxPreviewFields?: number; columnOrder?: string[] };
   calendar?: { dateFieldId: string };
   form?: { title?: string; fieldIds: string[]; redirectMessage?: string };
   dashboard?: { dateFieldId: string; metricFieldIds: string[] };

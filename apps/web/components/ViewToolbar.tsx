@@ -191,9 +191,24 @@ function KanbanEditor({
   onChange: (k: NonNullable<ViewConfig["kanban"]>) => void;
 }) {
   const stackFieldId = kanban?.stackFieldId ?? "";
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   if (stackFields.length === 0) {
     return <p className="text-xs text-neutral-400">Add a single-select field to this table to group a Kanban by it.</p>;
   }
+  // Buckets to order = the chosen field's options, in the saved order first.
+  const stackField = stackFields.find((f) => f.fieldId === stackFieldId);
+  const choices = stackField?.options?.choices?.map((c) => c.name) ?? [];
+  const order = kanban?.columnOrder ?? [];
+  const buckets = [...order.filter((n) => choices.includes(n)), ...choices.filter((n) => !order.includes(n))];
+
+  const onBucketDragEnd = (e: DragEndEvent) => {
+    if (!e.over || e.active.id === e.over.id) return;
+    const from = buckets.indexOf(String(e.active.id));
+    const to = buckets.indexOf(String(e.over.id));
+    if (from < 0 || to < 0) return;
+    onChange({ ...kanban, stackFieldId, columnOrder: arrayMove(buckets, from, to) });
+  };
+
   return (
     <div className="space-y-3 text-sm">
       <div className="space-y-1">
@@ -201,7 +216,8 @@ function KanbanEditor({
         <select
           className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
           value={stackFieldId}
-          onChange={(e) => onChange({ ...kanban, stackFieldId: e.target.value })}
+          // Changing the field invalidates the old field's column order.
+          onChange={(e) => onChange({ ...kanban, stackFieldId: e.target.value, columnOrder: undefined })}
         >
           <option value="" disabled>Choose a field…</option>
           {stackFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
@@ -217,7 +233,44 @@ function KanbanEditor({
           onChange={(e) => onChange({ ...kanban, stackFieldId, maxPreviewFields: Number(e.target.value) })}
         />
       </div>
-      <p className="text-xs text-neutral-400">Columns come from this field’s options. Use the <span className="font-medium">Fields</span> menu to choose which fields show on each card.</p>
+      {buckets.length ? (
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-neutral-600">Column order</label>
+          <DndContext sensors={sensors} onDragEnd={onBucketDragEnd}>
+            <SortableContext items={buckets} strategy={verticalListSortingStrategy}>
+              <div className="space-y-1">
+                {buckets.map((name) => <SortableBucketRow key={name} name={name} />)}
+              </div>
+            </SortableContext>
+          </DndContext>
+          <p className="text-[11px] text-neutral-400">Drag to set left-to-right column order. “Uncategorized” always shows last.</p>
+        </div>
+      ) : null}
+      <p className="text-xs text-neutral-400">Use the <span className="font-medium">Fields</span> menu to choose which fields show on each card.</p>
+    </div>
+  );
+}
+
+/** One draggable Kanban bucket in the column-order list. */
+function SortableBucketRow({ name }: { name: string }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: name });
+  const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : undefined };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-2 rounded border border-surface-border px-2 py-1 text-xs ${isDragging ? "bg-surface-muted shadow-sm" : "bg-white"}`}
+    >
+      <button
+        type="button"
+        className="cursor-grab touch-none text-base leading-none text-neutral-400 hover:text-neutral-700 active:cursor-grabbing"
+        aria-label="Drag to reorder"
+        {...attributes}
+        {...listeners}
+      >
+        ⠿
+      </button>
+      <span className="flex-1 truncate">{name}</span>
     </div>
   );
 }
@@ -487,7 +540,8 @@ function FieldEditor({ allFields, configFields, onChange }: { allFields: FieldMe
   };
 
   return (
-    <div className="max-h-80 space-y-0.5 overflow-auto">
+    // pr-3 keeps the drag handle clear of the (overlay) scrollbar.
+    <div className="max-h-80 space-y-0.5 overflow-auto pr-3">
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
         <SortableContext items={ordered.map((f) => f.fieldId)} strategy={verticalListSortingStrategy}>
           {ordered.map((f) => (
@@ -496,7 +550,8 @@ function FieldEditor({ allFields, configFields, onChange }: { allFields: FieldMe
         </SortableContext>
       </DndContext>
       {allFields.filter((f) => !visible.has(f.fieldId)).map((f) => (
-        <div key={f.fieldId} className="flex items-center gap-2 text-xs text-neutral-400">
+        // pl-8 aligns the hidden rows under the visible rows' checkbox (past the handle).
+        <div key={f.fieldId} className="flex items-center gap-2 py-1 pl-8 text-xs text-neutral-400">
           <input type="checkbox" checked={false} onChange={() => setVisible(f.fieldId, true)} />
           <span className="flex-1 truncate">{f.name}</span>
         </div>
@@ -505,7 +560,9 @@ function FieldEditor({ allFields, configFields, onChange }: { allFields: FieldMe
   );
 }
 
-/** One draggable visible-field row: drag handle reorders, checkbox hides. */
+/** One draggable visible-field row: a generous left drag handle reorders,
+ *  checkbox hides. Handle is on the left so the scroll container's scrollbar
+ *  never overlaps it. */
 function SortableFieldRow({ field, onHide }: { field: FieldMeta; onHide: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.fieldId });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : undefined };
@@ -515,17 +572,17 @@ function SortableFieldRow({ field, onHide }: { field: FieldMeta; onHide: () => v
       style={style}
       className={`flex items-center gap-2 rounded text-xs ${isDragging ? "bg-surface-muted shadow-sm" : ""}`}
     >
-      <input type="checkbox" checked onChange={onHide} />
-      <span className="flex-1 truncate">{field.name}</span>
       <button
         type="button"
-        className="cursor-grab px-1 text-neutral-300 hover:text-neutral-600 active:cursor-grabbing"
+        className="-my-0.5 cursor-grab touch-none px-1.5 py-1.5 text-base leading-none text-neutral-400 hover:text-neutral-700 active:cursor-grabbing"
         aria-label="Drag to reorder"
         {...attributes}
         {...listeners}
       >
         ⠿
       </button>
+      <input type="checkbox" checked onChange={onHide} />
+      <span className="flex-1 truncate">{field.name}</span>
     </div>
   );
 }

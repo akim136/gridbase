@@ -48,11 +48,15 @@ export function KanbanView({
   };
   // Columns = the field's defined options, plus any value present in records that
   // isn't a defined option (so no record silently vanishes when choices are
-  // incomplete), then the catch-all Uncategorized column.
+  // incomplete). A saved columnOrder pins the left-to-right order; anything not
+  // listed follows in natural order. Uncategorized is always last.
   const defined = stackField.options?.choices?.map((c) => c.name) ?? [];
   const present = recs.map(bucketOf).filter((b) => b !== UNSET);
+  const all = [...new Set([...defined, ...present])];
+  const order = view.config.kanban?.columnOrder ?? [];
+  const sorted = [...order.filter((n) => all.includes(n)), ...all.filter((n) => !order.includes(n))];
   const columns = [
-    ...[...new Set([...defined, ...present])].map((name) => ({ id: name, label: name })),
+    ...sorted.map((name) => ({ id: name, label: name })),
     { id: UNSET, label: "Uncategorized" },
   ];
 
