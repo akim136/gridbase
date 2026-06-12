@@ -18,7 +18,7 @@
  */
 import { aggregate } from "./aggregate.js";
 import { createDashboard, deleteDashboard, updateDashboard } from "./dashboards.js";
-import { loadRegistry } from "./meta.js";
+import { invalidateRegistry, loadRegistry } from "./meta.js";
 import {
   createRecords,
   deleteRecords,
@@ -30,8 +30,9 @@ import {
   type WriteInput,
 } from "./repo.js";
 import { createView, deleteView, updateView } from "./views.js";
+import { createField, deleteField } from "./fields.js";
 import { isFilterGroup } from "./types.js";
-import type { AggregateSpec, DashboardConfig, FilterSpec, Registry, ViewConfig } from "./types.js";
+import type { AggregateSpec, DashboardConfig, FieldType, FilterSpec, Registry, ViewConfig } from "./types.js";
 
 export interface Env {
   DB: D1Database;
@@ -268,6 +269,30 @@ export default {
       if (am && request.method === "GET") {
         const rows = await aggregate(env.DB, reg, decodeURIComponent(am[1]!), parseAggregateSpec(url));
         return json({ rows });
+      }
+
+      // /v1/tables/:tableId/fields  (create)  and  /v1/tables/:tableId/fields/:fieldId  (delete)
+      const fm = pathname.match(/^\/v1\/tables\/([^/]+)\/fields(?:\/([^/]+))?$/);
+      if (fm) {
+        const tableId = decodeURIComponent(fm[1]!);
+        const fieldId = fm[2] ? decodeURIComponent(fm[2]) : undefined;
+        if (request.method === "POST" && !fieldId) {
+          const body = (await request.json().catch(() => null)) as
+            | { name?: string; type?: string; options?: Record<string, unknown> | null }
+            | null;
+          if (!body?.name || !body.type) return json({ error: "expected { name, type, options? }" }, 400);
+          const field = await createField(env.DB, reg, tableId, {
+            name: body.name, type: body.type as FieldType, options: body.options ?? null,
+          });
+          invalidateRegistry(); // schema (tables+fields) is isolate-cached; DDL just changed it
+          return json(field);
+        }
+        if (request.method === "DELETE" && fieldId) {
+          const ok = await deleteField(env.DB, reg, tableId, fieldId);
+          invalidateRegistry();
+          return ok ? json({ deleted: true, id: fieldId }) : json({ error: "not found" }, 404);
+        }
+        return json({ error: "method not allowed" }, 405);
       }
 
       // /v1/tables/:tableId/records  and  /v1/tables/:tableId/records/:id

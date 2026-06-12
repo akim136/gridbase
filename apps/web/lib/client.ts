@@ -1,5 +1,5 @@
 "use client";
-import type { DashboardMeta, ViewConfig, ViewMeta, Widget } from "./types";
+import type { DashboardMeta, FieldMeta, FieldOptions, FieldType, ViewConfig, ViewMeta, Widget } from "./types";
 
 /**
  * Browser-side calls to the BFF (/api/grid/* → grid-api /v1/*). The Bearer
@@ -41,6 +41,14 @@ export const updateDashboard = (id: string, input: { name?: string; config?: { w
   call<DashboardMeta>("PATCH", `dashboards/${id}`, input);
 
 export const deleteDashboard = (id: string) => call<{ deleted: boolean }>("DELETE", `dashboards/${id}`);
+
+// ---- field (schema) mutations ----
+
+export const createField = (tableId: string, input: { name: string; type: FieldType; options?: FieldOptions | null }) =>
+  call<FieldMeta>("POST", `tables/${tableId}/fields`, input);
+
+export const deleteField = (tableId: string, fieldId: string) =>
+  call<{ deleted: boolean; id: string }>("DELETE", `tables/${tableId}/fields/${encodeURIComponent(fieldId)}`);
 
 // ---- record mutations (typecast: true → resolve selects/links given by name) ----
 

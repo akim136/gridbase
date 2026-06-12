@@ -4,8 +4,8 @@ import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { updateViewConfig } from "@/lib/client";
-import type { FieldMeta, FilterCondition, FilterGroup, FilterItem, Meta, ViewConfig } from "@/lib/types";
+import { createField, deleteField, updateViewConfig } from "@/lib/client";
+import type { FieldMeta, FieldOptions, FieldType, FilterCondition, FilterGroup, FilterItem, Meta, ViewConfig } from "@/lib/types";
 import { fieldsForTable, isFilterGroup } from "@/lib/types";
 
 const OPS_BY_KIND: Record<string, Array<{ op: string; label: string; noValue?: boolean }>> = {
@@ -152,7 +152,7 @@ export function ViewToolbar({
       ) : null}
       {open === "fields" ? (
         <div className={panel} style={{ top: "100%", right: 0 }}>
-          <FieldEditor allFields={fields} configFields={cfg.fields} onChange={(f) => save({ ...cfg, fields: f })} />
+          <FieldEditor allFields={fields} configFields={cfg.fields} meta={meta} onChange={(f) => save({ ...cfg, fields: f })} />
         </div>
       ) : null}
       {open === "freeze" ? (
@@ -515,7 +515,9 @@ function SortEditor({ fields, meta, sorts, onChange }: { fields: FieldMeta[]; me
   );
 }
 
-function FieldEditor({ allFields, configFields, onChange }: { allFields: FieldMeta[]; configFields: ViewConfig["fields"]; onChange: (f: ViewConfig["fields"]) => void }) {
+function FieldEditor({ allFields, configFields, meta, onChange }: { allFields: FieldMeta[]; configFields: ViewConfig["fields"]; meta: Meta; onChange: (f: ViewConfig["fields"]) => void }) {
+  const router = useRouter();
+  const tableId = allFields[0]?.tableId;
   // Current ordered+visible list; default = all fields by position.
   const ordered = configFields && configFields.length
     ? configFields.map((c) => allFields.find((f) => f.fieldId === c.fieldId)).filter((f): f is FieldMeta => Boolean(f))
@@ -538,39 +540,65 @@ function FieldEditor({ allFields, configFields, onChange }: { allFields: FieldMe
     if (from < 0 || to < 0) return;
     onChange(arrayMove(ordered, from, to).map((f) => ({ fieldId: f.fieldId })));
   };
+  const onDelete = async (field: FieldMeta) => {
+    if (!tableId) return;
+    if (!window.confirm(`Delete the field “${field.name}”? This removes its data and can’t be undone.`)) return;
+    try {
+      await deleteField(tableId, field.fieldId);
+      router.refresh();
+    } catch (e) {
+      alert(`Delete failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
 
   return (
     // pr-3 keeps the drag handle clear of the (overlay) scrollbar.
-    <div className="max-h-80 space-y-0.5 overflow-auto pr-3">
+    <div className="max-h-[28rem] space-y-0.5 overflow-auto pr-3">
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
         <SortableContext items={ordered.map((f) => f.fieldId)} strategy={verticalListSortingStrategy}>
           {ordered.map((f) => (
-            <SortableFieldRow key={f.fieldId} field={f} onHide={() => setVisible(f.fieldId, false)} />
+            <SortableFieldRow key={f.fieldId} field={f} onHide={() => setVisible(f.fieldId, false)} onDelete={() => onDelete(f)} />
           ))}
         </SortableContext>
       </DndContext>
       {allFields.filter((f) => !visible.has(f.fieldId)).map((f) => (
         // pl-8 aligns the hidden rows under the visible rows' checkbox (past the handle).
-        <div key={f.fieldId} className="flex items-center gap-2 py-1 pl-8 text-xs text-neutral-400">
+        <div key={f.fieldId} className="group flex items-center gap-2 py-1 pl-8 text-xs text-neutral-400">
           <input type="checkbox" checked={false} onChange={() => setVisible(f.fieldId, true)} />
           <span className="flex-1 truncate">{f.name}</span>
+          {!f.isPrimary ? (
+            <button type="button" className="px-1 text-neutral-300 opacity-0 hover:text-red-500 group-hover:opacity-100" aria-label="Delete field" onClick={() => onDelete(f)}>✕</button>
+          ) : null}
         </div>
       ))}
+      {tableId ? (
+        <AddFieldForm
+          tableId={tableId}
+          fields={allFields}
+          meta={meta}
+          onCreated={(field) => {
+            // If the view pins an explicit field list, append the new field so it
+            // shows right away (save() refreshes); otherwise all fields show already.
+            if (configFields && configFields.length) onChange([...configFields, { fieldId: field.fieldId }]);
+            else router.refresh();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
 /** One draggable visible-field row: a generous left drag handle reorders,
- *  checkbox hides. Handle is on the left so the scroll container's scrollbar
- *  never overlaps it. */
-function SortableFieldRow({ field, onHide }: { field: FieldMeta; onHide: () => void }) {
+ *  checkbox hides, and a hover ✕ deletes (non-primary only). The handle is on
+ *  the left so the scroll container's scrollbar never overlaps it. */
+function SortableFieldRow({ field, onHide, onDelete }: { field: FieldMeta; onHide: () => void; onDelete: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.fieldId });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : undefined };
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-2 rounded text-xs ${isDragging ? "bg-surface-muted shadow-sm" : ""}`}
+      className={`group flex items-center gap-2 rounded text-xs ${isDragging ? "bg-surface-muted shadow-sm" : ""}`}
     >
       <button
         type="button"
@@ -583,6 +611,103 @@ function SortableFieldRow({ field, onHide }: { field: FieldMeta; onHide: () => v
       </button>
       <input type="checkbox" checked onChange={onHide} />
       <span className="flex-1 truncate">{field.name}</span>
+      {!field.isPrimary ? (
+        <button type="button" className="px-1 text-neutral-300 opacity-0 hover:text-red-500 group-hover:opacity-100" aria-label="Delete field" onClick={onDelete}>✕</button>
+      ) : null}
+    </div>
+  );
+}
+
+const AGGS: Array<"count" | "sum" | "avg" | "min" | "max"> = ["count", "sum", "avg", "min", "max"];
+const CREATE_TYPES: Array<{ type: FieldType; label: string }> = [
+  { type: "text", label: "Text" }, { type: "longtext", label: "Long text" }, { type: "number", label: "Number" },
+  { type: "checkbox", label: "Checkbox" }, { type: "date", label: "Date" }, { type: "datetime", label: "Date & time" },
+  { type: "url", label: "URL" }, { type: "email", label: "Email" },
+  { type: "select", label: "Single select" }, { type: "multiselect", label: "Multi select" },
+  { type: "rollup", label: "Rollup" },
+];
+
+/** Self-service "add field" form. Stored types create a column; rollups aggregate
+ *  a number across a link field; select types take comma-separated choices. */
+function AddFieldForm({ tableId, fields, meta, onCreated }: { tableId: string; fields: FieldMeta[]; meta: Meta; onCreated: (field: FieldMeta) => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [type, setType] = useState<FieldType>("text");
+  const [choices, setChoices] = useState("");
+  const [via, setVia] = useState("");
+  const [agg, setAgg] = useState<"count" | "sum" | "avg" | "min" | "max">("count");
+  const [target, setTarget] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const linkFields = fields.filter((f) => f.type === "link");
+  const viaField = linkFields.find((f) => f.fieldId === via);
+  const targetFields = viaField?.options?.linkedTableId
+    ? fieldsForTable(meta, viaField.options.linkedTableId).filter((f) => f.type === "number")
+    : [];
+  const sel = "w-full rounded border border-surface-border px-1.5 py-1 text-xs";
+
+  const reset = () => { setName(""); setType("text"); setChoices(""); setVia(""); setAgg("count"); setTarget(""); };
+  const submit = async () => {
+    if (!name.trim()) return;
+    let options: FieldOptions | null = null;
+    if (type === "rollup") {
+      if (!via) { alert("Pick a link field to roll up."); return; }
+      if (agg !== "count" && !target) { alert("Pick a number field to aggregate."); return; }
+      options = { rollup: { via, agg, ...(agg !== "count" && target ? { target } : {}) } };
+    } else if (type === "select" || type === "multiselect") {
+      options = { choices: choices.split(",").map((s) => s.trim()).filter(Boolean).map((nm) => ({ name: nm })) };
+    }
+    setBusy(true);
+    try {
+      const created = await createField(tableId, { name: name.trim(), type, options });
+      reset(); setOpen(false); onCreated(created);
+    } catch (e) {
+      alert(`Create failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button type="button" className="mt-2 w-full rounded-md border border-dashed border-surface-border px-2 py-1.5 text-xs text-neutral-500 hover:border-blue-300 hover:text-blue-600" onClick={() => setOpen(true)}>
+        + Add field
+      </button>
+    );
+  }
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-surface-border bg-surface-muted/40 p-2">
+      <input className={sel} placeholder="Field name" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
+      <select className={sel} value={type} onChange={(e) => setType(e.target.value as FieldType)}>
+        {CREATE_TYPES.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
+      </select>
+      {(type === "select" || type === "multiselect") ? (
+        <input className={sel} placeholder="Choices, comma-separated" value={choices} onChange={(e) => setChoices(e.target.value)} />
+      ) : null}
+      {type === "rollup" ? (
+        <>
+          <select className={sel} value={via} onChange={(e) => { setVia(e.target.value); setTarget(""); }}>
+            <option value="" disabled>Roll up via… (a link field)</option>
+            {linkFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
+          </select>
+          <select className={sel} value={agg} onChange={(e) => setAgg(e.target.value as typeof agg)}>
+            {AGGS.map((a) => <option key={a} value={a}>{a.toUpperCase()}</option>)}
+          </select>
+          {agg !== "count" ? (
+            <select className={sel} value={target} onChange={(e) => setTarget(e.target.value)}>
+              <option value="" disabled>Number field to aggregate…</option>
+              {targetFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
+            </select>
+          ) : null}
+          {linkFields.length === 0 ? <p className="text-[11px] text-amber-600">This table has no link fields to roll up.</p> : null}
+        </>
+      ) : null}
+      <div className="flex items-center gap-2">
+        <button type="button" disabled={busy} className="rounded-md bg-blue-600 px-2.5 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50" onClick={submit}>
+          {busy ? "Adding…" : "Add field"}
+        </button>
+        <button type="button" className="text-xs text-neutral-400 hover:text-neutral-700" onClick={() => { reset(); setOpen(false); }}>Cancel</button>
+      </div>
     </div>
   );
 }
