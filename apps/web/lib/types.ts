@@ -74,7 +74,7 @@ export interface ViewConfig {
   };
   sorts?: Array<{ fieldId: string; linkedFieldId?: string; direction?: "asc" | "desc" }>;
   groupBy?: string;
-  kanban?: { stackFieldId: string; maxPreviewFields?: number; columnOrder?: string[] };
+  kanban?: { stackFieldId: string; maxPreviewFields?: number; columnOrder?: string[]; collapsedColumns?: string[] };
   calendar?: { dateFieldId: string };
   gallery?: { coverFieldId?: string; maxPreviewFields?: number };
   gantt?: { startFieldId: string; endFieldId?: string };

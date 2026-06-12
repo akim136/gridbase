@@ -3,7 +3,7 @@ import { DndContext, type DragEndEvent, PointerSensor, useDraggable, useDroppabl
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { updateRecord } from "@/lib/client";
+import { createRecord, updateRecord, updateViewConfig } from "@/lib/client";
 import { previewValue, recordTitle } from "@/lib/preview";
 import { type FieldMeta, fieldsForTable, type Meta, type RecordEnvelope, type ViewMeta, visibleFields } from "@/lib/types";
 
@@ -77,13 +77,43 @@ export function KanbanView({
     }
   }
 
+  // Quick-add: a blank record pre-filled with this column's stack value, ready
+  // for inline editing on its detail page.
+  async function addToColumn(columnId: string) {
+    try {
+      const res = await createRecord(view.tableId, columnId === UNSET ? {} : { [stackId!]: columnId });
+      const id = res.records[0]?.id;
+      if (id) router.push(`/t/${view.tableId}/${view.viewId}/${id}`);
+      router.refresh();
+    } catch (err) {
+      alert(`Add failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Collapsed columns shrink to a slim vertical bar (persisted per view).
+  const collapsed = new Set(view.config.kanban?.collapsedColumns ?? []);
+  async function setCollapsed(columnId: string, on: boolean) {
+    const next = on ? [...collapsed, columnId] : [...collapsed].filter((c) => c !== columnId);
+    try {
+      await updateViewConfig(view.viewId, { ...view.config, kanban: { ...view.config.kanban!, collapsedColumns: next } });
+      router.refresh();
+    } catch (err) {
+      alert(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   return (
     <DndContext sensors={sensors} onDragEnd={onDragEnd}>
       <div className="flex gap-3 overflow-x-auto pb-2">
         {columns.map((col) => {
           const cards = recs.filter((r) => bucketOf(r) === col.id);
+          if (collapsed.has(col.id)) {
+            return (
+              <CollapsedColumn key={col.id} id={col.id} label={col.label} count={cards.length} onExpand={() => setCollapsed(col.id, false)} />
+            );
+          }
           return (
-            <Column key={col.id} id={col.id} label={col.label} count={cards.length}>
+            <Column key={col.id} id={col.id} label={col.label} count={cards.length} onCollapse={() => setCollapsed(col.id, true)} onAdd={() => addToColumn(col.id)}>
               {cards.map((rec) => (
                 <Card
                   key={rec.id}
@@ -102,16 +132,40 @@ export function KanbanView({
   );
 }
 
-function Column({ id, label, count, children }: { id: string; label: string; count: number; children: React.ReactNode }) {
+function Column({ id, label, count, onCollapse, onAdd, children }: { id: string; label: string; count: number; onCollapse: () => void; onAdd: () => void; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
-    <div ref={setNodeRef} className={`w-64 flex-shrink-0 rounded-lg p-1 ${isOver ? "bg-blue-50 ring-1 ring-blue-200" : ""}`}>
-      <div className="mb-2 flex items-center justify-between px-1">
-        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</span>
+    <div ref={setNodeRef} className={`group/col w-64 flex-shrink-0 rounded-lg p-1 ${isOver ? "bg-blue-50 ring-1 ring-blue-200" : ""}`}>
+      <div className="mb-2 flex items-center gap-1.5 px-1">
+        <span className="truncate text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</span>
         <span className="text-xs text-neutral-400">{count}</span>
+        <span className="ml-auto flex items-center gap-0.5 opacity-0 group-hover/col:opacity-100">
+          <button type="button" title="New record in this column" onClick={onAdd} className="rounded px-1 text-neutral-400 hover:bg-surface-muted hover:text-blue-600">+</button>
+          <button type="button" title="Collapse column" onClick={onCollapse} className="rounded px-1 text-neutral-400 hover:bg-surface-muted hover:text-neutral-700">⇤</button>
+        </span>
       </div>
       <div className="space-y-2">{children}</div>
     </div>
+  );
+}
+
+/** A collapsed bucket: slim vertical bar showing the name + count; still a drop
+ *  target, click to expand. */
+function CollapsedColumn({ id, label, count, onExpand }: { id: string; label: string; count: number; onExpand: () => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onExpand}
+      title={`Expand ${label}`}
+      className={`flex w-9 flex-shrink-0 flex-col items-center gap-2 rounded-lg border border-surface-border bg-surface-muted/60 py-2 ${isOver ? "bg-blue-50 ring-1 ring-blue-200" : "hover:bg-surface-muted"}`}
+    >
+      <span className="text-xs text-neutral-400">{count}</span>
+      <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500" style={{ writingMode: "vertical-rl" }}>
+        {label}
+      </span>
+    </button>
   );
 }
 
