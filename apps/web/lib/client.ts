@@ -61,6 +61,15 @@ export const createRecords = (tableId: string, rows: Array<Record<string, unknow
 export const deleteRecord = (tableId: string, id: string) =>
   call<{ records: Array<{ id: string; deleted: boolean }> }>("DELETE", `tables/${tableId}/records?records[]=${encodeURIComponent(id)}`);
 
+/** Batch-delete records, chunked to grid-api's MAX_WRITE_BATCH (50) per call. */
+export async function deleteRecords(tableId: string, ids: string[]): Promise<void> {
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    const qs = chunk.map((id) => `records[]=${encodeURIComponent(id)}`).join("&");
+    await call<{ records: Array<{ id: string; deleted: boolean }> }>("DELETE", `tables/${tableId}/records?${qs}`);
+  }
+}
+
 /** List a table's records (id + chosen fields) — used by the linked-record picker. */
 export const listRecords = (tableId: string, fields: string[]) =>
   call<RecordResult>("GET", `tables/${tableId}/records?fields=${fields.join(",")}&pageSize=100`);

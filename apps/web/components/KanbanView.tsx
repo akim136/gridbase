@@ -42,14 +42,19 @@ export function KanbanView({
   const previewFields = fields
     .filter((f) => f.fieldId !== primaryId && f.fieldId !== stackId)
     .slice(0, maxPreview);
-  const columns = [
-    ...(stackField.options?.choices?.map((c) => ({ id: c.name, label: c.name })) ?? []),
-    { id: UNSET, label: "Uncategorized" },
-  ];
   const bucketOf = (rec: RecordEnvelope) => {
     const v = rec.fields[stackId];
     return v == null || v === "" ? UNSET : String(v);
   };
+  // Columns = the field's defined options, plus any value present in records that
+  // isn't a defined option (so no record silently vanishes when choices are
+  // incomplete), then the catch-all Uncategorized column.
+  const defined = stackField.options?.choices?.map((c) => c.name) ?? [];
+  const present = recs.map(bucketOf).filter((b) => b !== UNSET);
+  const columns = [
+    ...[...new Set([...defined, ...present])].map((name) => ({ id: name, label: name })),
+    { id: UNSET, label: "Uncategorized" },
+  ];
 
   async function onDragEnd(e: DragEndEvent) {
     const recordId = String(e.active.id);

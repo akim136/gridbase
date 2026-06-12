@@ -49,6 +49,11 @@ const formula = (id, name, spec) => ({ id, name, type: "formula", options: { for
 const lookup = (id, name, viaFieldId, targetFieldId) => ({
   id, name, type: "lookup", options: { lookup: { via: viaFieldId, target: targetFieldId } },
 });
+// Rollup: aggregate across record(s) linked via `viaFieldId`. `count` ignores
+// targetFieldId; sum/avg/min/max aggregate that numeric target. Computed on read.
+const rollup = (id, name, viaFieldId, agg, targetFieldId) => ({
+  id, name, type: "rollup", options: { rollup: { via: viaFieldId, agg, ...(targetFieldId ? { target: targetFieldId } : {}) } },
+});
 const choices = (...names) => names.map((n) => ({ name: n }));
 
 /** @typedef {{id:string,name:string,slug:string,primaryFieldId:string,fields:object[]}} TableSpec */
@@ -75,6 +80,9 @@ export const TABLES = [
       f("fld_277b1a34818263ca", "Notes", "longtext", "notes"),
       link("fld_c4b2c9df60aa659c", "Contacts", "link_company_contacts", "company_id", "contact_id", TBL_CONTACTS, "one-to-many"),
       link("fld_f4d4754c0f773ee9", "Deals", "link_company_deals", "company_id", "deal_id", TBL_DEALS, "one-to-many"),
+      // Rollups over the Deals link: how many deals, and their total amount.
+      rollup("fld_rollup_dealcount", "# Deals", "fld_f4d4754c0f773ee9", "count"),
+      rollup("fld_rollup_dealtotal", "Total Deal Amount", "fld_f4d4754c0f773ee9", "sum", FD_AMOUNT),
     ],
   },
   {

@@ -1,5 +1,5 @@
 import { buildOrderBy, buildWhere } from "./filter.js";
-import { assembleRecord, coerceLookupValue } from "./records.js";
+import { aggregateRollup, assembleRecord, coerceLookupValue } from "./records.js";
 import type {
   FieldMeta,
   FilterSpec,
@@ -128,6 +128,78 @@ async function resolveLookups(
   return byRow;
 }
 
+/** rowId → (rollupFieldId → aggregated scalar). `count` uses the `via` link's
+ *  edge count; sum/avg/min/max read the numeric `target` column from the linked
+ *  table (same edge walk as lookups) and reduce to one number per row. */
+async function resolveRollups(
+  db: D1Database,
+  reg: Registry,
+  fields: FieldMeta[],
+  linkByRow: Map<string, Map<string, string[]>>,
+  rowIds: string[],
+  wanted: Set<string> | undefined,
+): Promise<Map<string, Map<string, number>>> {
+  const byRow = new Map<string, Map<string, number>>();
+  const rollupFields = fields.filter(
+    (f) => f.type === "rollup" && f.options?.rollup && (!wanted || wanted.has(f.fieldId)),
+  );
+  if (rollupFields.length === 0 || rowIds.length === 0) return byRow;
+
+  const put = (rid: string, fid: string, n: number) => {
+    let m = byRow.get(rid);
+    if (!m) { m = new Map(); byRow.set(rid, m); }
+    m.set(fid, n);
+  };
+
+  for (const rf of rollupFields) {
+    const { via, target, agg } = rf.options!.rollup!;
+
+    // count needs only the edge count — no linked-table read.
+    if (agg === "count") {
+      for (const rid of rowIds) put(rid, rf.fieldId, (linkByRow.get(rid)?.get(via) ?? []).length);
+      continue;
+    }
+
+    const viaField = reg.fieldById.get(via);
+    const targetField = target ? reg.fieldById.get(target) : undefined;
+    if (!viaField?.options?.linkedTableId || !targetField?.columnName) continue;
+    const linkedTable = reg.tables.find((t) => t.tableId === viaField.options!.linkedTableId);
+    if (!linkedTable) continue;
+
+    const allIds = new Set<string>();
+    for (const rid of rowIds) for (const id of linkByRow.get(rid)?.get(via) ?? []) allIds.add(id);
+    if (allIds.size === 0) {
+      for (const rid of rowIds) put(rid, rf.fieldId, 0);
+      continue;
+    }
+
+    // Chunk the IN(...) to stay under D1's 100-bound-parameter cap (a page can
+    // reference far more linked rows than that).
+    const idArr = [...allIds];
+    const valById = new Map<string, unknown>();
+    for (let i = 0; i < idArr.length; i += 90) {
+      const chunk = idArr.slice(i, i + 90);
+      const ph = chunk.map(() => "?").join(", ");
+      const res = await db
+        .prepare(`SELECT id, "${targetField.columnName}" AS v FROM ${linkedTable.slug} WHERE id IN (${ph})`)
+        .bind(...chunk)
+        .all<{ id: string; v: unknown }>();
+      for (const r of res.results ?? []) valById.set(String(r.id), r.v);
+    }
+
+    for (const rid of rowIds) {
+      const ids = linkByRow.get(rid)?.get(via) ?? [];
+      const nums = ids
+        .map((id) => valById.get(id))
+        .filter((v) => v != null && v !== "")
+        .map((v) => (typeof v === "number" ? v : Number(v)))
+        .filter((n) => Number.isFinite(n));
+      put(rid, rf.fieldId, aggregateRollup(agg, nums));
+    }
+  }
+  return byRow;
+}
+
 async function assembleRows(
   db: D1Database,
   reg: Registry,
@@ -139,9 +211,10 @@ async function assembleRows(
   const rowIds = rows.map((r) => String(r["id"]));
   const links = await resolveLinks(db, fields, rowIds);
   const lookups = await resolveLookups(db, reg, fields, links, rowIds, wanted);
+  const rollups = await resolveRollups(db, reg, fields, links, rowIds, wanted);
   return rows.map((row) => {
     const id = String(row["id"]);
-    return assembleRecord(table, fields, row, links.get(id) ?? new Map(), lookups.get(id) ?? new Map(), reg, wanted);
+    return assembleRecord(table, fields, row, links.get(id) ?? new Map(), lookups.get(id) ?? new Map(), rollups.get(id) ?? new Map(), reg, wanted);
   });
 }
 
@@ -254,7 +327,7 @@ async function writeRecord(
   for (const [fieldId, value] of Object.entries(input)) {
     const field = byId.get(fieldId);
     if (!field) continue;
-    if (field.type === "formula" || field.type === "lookup") continue; // not settable
+    if (field.type === "formula" || field.type === "lookup" || field.type === "rollup") continue; // not settable
     if (field.type === "link") {
       const raw = Array.isArray(value) ? value : value == null ? [] : [value];
       const ids: string[] = [];

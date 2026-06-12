@@ -1,4 +1,7 @@
 "use client";
+import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { updateViewConfig } from "@/lib/client";
@@ -78,18 +81,20 @@ const panel = "absolute z-40 mt-1 max-h-[70vh] w-[28rem] max-w-[calc(100vw-6rem)
 
 export function ViewToolbar({
   viewId,
+  viewType,
   fields,
   config,
   meta,
 }: {
   viewId: string;
+  viewType: string;
   fields: FieldMeta[];
   config: ViewConfig;
   meta: Meta;
 }) {
   const router = useRouter();
   const [cfg, setCfg] = useState<ViewConfig>(config);
-  const [open, setOpen] = useState<null | "filter" | "sort" | "fields" | "freeze">(null);
+  const [open, setOpen] = useState<null | "filter" | "sort" | "fields" | "freeze" | "kanban">(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => setCfg(config), [config]);
@@ -106,8 +111,11 @@ export function ViewToolbar({
   }
 
   // Link + lookup fields are now filterable/sortable (via a linked sub-field).
+  // Computed fields (formula/rollup) aren't sortable — they aren't stored columns.
   const filterable = fields.filter((f) => kindOf(f) !== null);
-  const sortable = fields.filter((f) => f.type !== "formula");
+  const sortable = fields.filter((f) => f.type !== "formula" && f.type !== "rollup");
+  // Single-select fields are the valid Kanban grouping fields.
+  const stackFields = fields.filter((f) => f.type === "select");
   const conds = cfg.filters?.conditions ?? [];
   const sorts = cfg.sorts ?? [];
   const hiddenCount = cfg.fields ? fields.length - cfg.fields.length : 0;
@@ -126,6 +134,11 @@ export function ViewToolbar({
       <button className={btn} onClick={() => setOpen(open === "freeze" ? null : "freeze")}>
         Freeze
       </button>
+      {viewType === "kanban" ? (
+        <button className={btn} onClick={() => setOpen(open === "kanban" ? null : "kanban")}>
+          Kanban
+        </button>
+      ) : null}
 
       {open === "filter" ? (
         <div className={panel} style={{ top: "100%", right: 0 }}>
@@ -152,6 +165,59 @@ export function ViewToolbar({
           />
         </div>
       ) : null}
+      {open === "kanban" ? (
+        <div className="absolute z-40 mt-1 w-72 rounded-lg border border-surface-border bg-white p-3 shadow-lg" style={{ top: "100%", right: 0 }}>
+          <KanbanEditor
+            stackFields={stackFields}
+            kanban={cfg.kanban}
+            onChange={(kanban) => save({ ...cfg, kanban })}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Configure a Kanban view: which single-select field stacks into columns, and
+ *  a soft cap on how many fields each card previews. Card field selection itself
+ *  is the shared "Fields" editor. */
+function KanbanEditor({
+  stackFields,
+  kanban,
+  onChange,
+}: {
+  stackFields: FieldMeta[];
+  kanban: ViewConfig["kanban"];
+  onChange: (k: NonNullable<ViewConfig["kanban"]>) => void;
+}) {
+  const stackFieldId = kanban?.stackFieldId ?? "";
+  if (stackFields.length === 0) {
+    return <p className="text-xs text-neutral-400">Add a single-select field to this table to group a Kanban by it.</p>;
+  }
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-neutral-600">Stack by</label>
+        <select
+          className="w-full rounded border border-surface-border px-1.5 py-1 text-sm"
+          value={stackFieldId}
+          onChange={(e) => onChange({ ...kanban, stackFieldId: e.target.value })}
+        >
+          <option value="" disabled>Choose a field…</option>
+          {stackFields.map((f) => <option key={f.fieldId} value={f.fieldId}>{f.name}</option>)}
+        </select>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-neutral-600">Max card fields</span>
+        <input
+          type="number"
+          min={0}
+          className="w-16 rounded border border-surface-border px-1.5 py-0.5 text-sm"
+          value={kanban?.maxPreviewFields ?? 8}
+          onChange={(e) => onChange({ ...kanban, stackFieldId, maxPreviewFields: Number(e.target.value) })}
+        />
+      </div>
+      <p className="text-xs text-neutral-400">Columns come from this field’s options. Use the <span className="font-medium">Fields</span> menu to choose which fields show on each card.</p>
     </div>
   );
 }
@@ -403,36 +469,63 @@ function FieldEditor({ allFields, configFields, onChange }: { allFields: FieldMe
     : allFields;
   const visible = new Set(ordered.map((f) => f.fieldId));
 
+  // A short drag distance keeps the checkbox clickable without starting a drag.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
   const setVisible = (fieldId: string, on: boolean) => {
     const next = on
       ? [...ordered, allFields.find((f) => f.fieldId === fieldId)!]
       : ordered.filter((f) => f.fieldId !== fieldId);
     onChange(next.map((f) => ({ fieldId: f.fieldId })));
   };
-  const move = (i: number, dir: -1 | 1) => {
-    const j = i + dir;
-    if (j < 0 || j >= ordered.length) return;
-    const next = [...ordered];
-    [next[i], next[j]] = [next[j]!, next[i]!];
-    onChange(next.map((f) => ({ fieldId: f.fieldId })));
+  const onDragEnd = (e: DragEndEvent) => {
+    if (!e.over || e.active.id === e.over.id) return;
+    const from = ordered.findIndex((f) => f.fieldId === e.active.id);
+    const to = ordered.findIndex((f) => f.fieldId === e.over!.id);
+    if (from < 0 || to < 0) return;
+    onChange(arrayMove(ordered, from, to).map((f) => ({ fieldId: f.fieldId })));
   };
 
   return (
     <div className="max-h-80 space-y-0.5 overflow-auto">
-      {ordered.map((f, i) => (
-        <div key={f.fieldId} className="flex items-center gap-2 text-xs">
-          <input type="checkbox" checked onChange={() => setVisible(f.fieldId, false)} />
-          <span className="flex-1 truncate">{f.name}</span>
-          <button className="text-neutral-300 hover:text-neutral-600" onClick={() => move(i, -1)}>↑</button>
-          <button className="text-neutral-300 hover:text-neutral-600" onClick={() => move(i, 1)}>↓</button>
-        </div>
-      ))}
+      <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+        <SortableContext items={ordered.map((f) => f.fieldId)} strategy={verticalListSortingStrategy}>
+          {ordered.map((f) => (
+            <SortableFieldRow key={f.fieldId} field={f} onHide={() => setVisible(f.fieldId, false)} />
+          ))}
+        </SortableContext>
+      </DndContext>
       {allFields.filter((f) => !visible.has(f.fieldId)).map((f) => (
         <div key={f.fieldId} className="flex items-center gap-2 text-xs text-neutral-400">
           <input type="checkbox" checked={false} onChange={() => setVisible(f.fieldId, true)} />
           <span className="flex-1 truncate">{f.name}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** One draggable visible-field row: drag handle reorders, checkbox hides. */
+function SortableFieldRow({ field, onHide }: { field: FieldMeta; onHide: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.fieldId });
+  const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : undefined };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-2 rounded text-xs ${isDragging ? "bg-surface-muted shadow-sm" : ""}`}
+    >
+      <input type="checkbox" checked onChange={onHide} />
+      <span className="flex-1 truncate">{field.name}</span>
+      <button
+        type="button"
+        className="cursor-grab px-1 text-neutral-300 hover:text-neutral-600 active:cursor-grabbing"
+        aria-label="Drag to reorder"
+        {...attributes}
+        {...listeners}
+      >
+        ⠿
+      </button>
     </div>
   );
 }

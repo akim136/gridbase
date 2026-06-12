@@ -52,9 +52,10 @@ TABLES.forEach((t, ti) => {
     else if (fld.type === "lookup") options = fld.options ?? null;
     else if (fld.options) options = fld.options;
 
-    const noColumn = fld.type === "link" || fld.type === "formula" || fld.type === "lookup";
+    // Computed fields (formula/lookup/rollup) have no physical column.
+    const noColumn = fld.type === "link" || fld.type === "formula" || fld.type === "lookup" || fld.type === "rollup";
     const columnName = noColumn ? null : fld.col;
-    const isComputed = fld.type === "formula" || fld.type === "lookup" ? 1 : 0;
+    const isComputed = fld.type === "formula" || fld.type === "lookup" || fld.type === "rollup" ? 1 : 0;
     const isPrimary = fld.id === t.primaryFieldId ? 1 : 0;
 
     out.push(

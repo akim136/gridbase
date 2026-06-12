@@ -3,7 +3,7 @@
 export type FieldType =
   | "text" | "longtext" | "number" | "date" | "datetime"
   | "select" | "multiselect" | "checkbox" | "url" | "email" | "json"
-  | "formula" | "link" | "lookup";
+  | "formula" | "link" | "lookup" | "rollup";
 
 export interface SelectChoice {
   id?: string;
@@ -14,6 +14,8 @@ export interface SelectChoice {
 export interface FieldOptions {
   choices?: SelectChoice[];
   formula?: unknown;
+  lookup?: unknown;
+  rollup?: unknown;
   timezone?: string;
   join?: string;
   self?: string;

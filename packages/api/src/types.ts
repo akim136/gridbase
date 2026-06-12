@@ -3,7 +3,7 @@
 export type FieldType =
   | "text" | "longtext" | "number" | "date" | "datetime"
   | "select" | "multiselect" | "checkbox" | "url" | "email" | "json"
-  | "formula" | "link" | "lookup";
+  | "formula" | "link" | "lookup" | "rollup";
 
 export interface SelectChoice {
   id?: string;
@@ -23,6 +23,15 @@ export interface LookupSpec {
   target: string;
 }
 
+/** Rollup: aggregate `target` across the record(s) linked via the `via` link
+ *  field. `count` ignores `target` (counts linked rows); sum/avg/min/max read
+ *  the numeric `target` column. */
+export interface RollupSpec {
+  via: string;
+  target?: string;
+  agg: "count" | "sum" | "avg" | "min" | "max";
+}
+
 export interface LinkOptions {
   join: string;          // join-table name
   self: string;          // this row's endpoint column in the join table
@@ -35,6 +44,7 @@ export interface FieldOptions {
   choices?: SelectChoice[];
   formula?: FormulaSpec;
   lookup?: LookupSpec;
+  rollup?: RollupSpec;
   timezone?: string;
   // link options are flattened here too
   join?: string;

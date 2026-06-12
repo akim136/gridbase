@@ -25,7 +25,7 @@ export default async function ViewPage({
   const view = meta.views.find((v) => v.viewId === viewId && v.tableId === tableId);
   if (!table || !view) notFound();
 
-  const { records } = await listRecords(tableId, {
+  const { records, offset } = await listRecords(tableId, {
     sort: view.config.sorts,
     filter: view.config.filters,
     pageSize: 100,
@@ -49,14 +49,14 @@ export default async function ViewPage({
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold tracking-tight text-neutral-900">{table.name}</h1>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400">{records.length} records</span>
+            <span className="text-xs text-neutral-400">{records.length}{offset ? "+" : ""} records</span>
             <ImportButton tableId={tableId} fields={fields} />
             <NewRecordButton tableId={tableId} fields={fields} />
           </div>
         </div>
         <div className="mt-3 flex items-center justify-between">
           <ViewSwitcher tableId={tableId} currentViewId={viewId} views={allViews} currentConfig={view.config} />
-          {view.type !== "form" ? <ViewToolbar viewId={viewId} fields={fields} config={view.config} meta={meta} /> : null}
+          {view.type !== "form" ? <ViewToolbar viewId={viewId} viewType={view.type} fields={fields} config={view.config} meta={meta} /> : null}
         </div>
       </header>
 
@@ -70,7 +70,7 @@ export default async function ViewPage({
         ) : view.type === "dashboard" ? (
           <DashboardView meta={meta} view={view} records={records} />
         ) : (
-          <TableView meta={meta} view={view} records={records} labels={labels} />
+          <TableView meta={meta} view={view} records={records} labels={labels} initialOffset={offset} />
         )}
       </div>
     </div>
