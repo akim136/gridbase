@@ -94,7 +94,7 @@ export function ViewSwitcher({
   }
 
   return (
-    <div ref={ref} className="relative flex items-center gap-1">
+    <div ref={ref} className="relative flex flex-wrap items-center gap-1">
       {visible.map((v) => {
         const active = v.viewId === currentViewId;
         return (

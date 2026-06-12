@@ -63,6 +63,25 @@ export function getRecord(tableId: string, id: string): Promise<RecordEnvelope> 
   return call<RecordEnvelope>(`/v1/tables/${encodeURIComponent(tableId)}/records/${encodeURIComponent(id)}`);
 }
 
+/** Page through a table until done (bounded). The table view paginates client-side
+ *  via "Load more", but layout views (kanban/calendar/gallery/gantt) render the
+ *  whole set at once — without this they silently showed only the first page. */
+export async function listAllRecords(
+  tableId: string,
+  params: Omit<ListParams, "pageSize" | "offset"> = {},
+  maxPages = 20,
+): Promise<{ records: RecordEnvelope[]; truncated: boolean }> {
+  const records: RecordEnvelope[] = [];
+  let offset: string | undefined;
+  for (let i = 0; i < maxPages; i++) {
+    const page = await listRecords(tableId, { ...params, pageSize: 100, offset });
+    records.push(...page.records);
+    offset = page.offset;
+    if (!offset) return { records, truncated: false };
+  }
+  return { records, truncated: true };
+}
+
 /** Grouped aggregation for a dashboard widget. */
 export function getAggregate(
   tableId: string,

@@ -77,8 +77,9 @@ function effectiveField(field: FieldMeta, linkedFieldId: string | undefined, met
 }
 
 const btn = "rounded-md border border-surface-border px-2.5 py-1 text-xs text-neutral-600 hover:bg-surface-muted";
-const panel = "absolute z-40 mt-1 max-h-[70vh] w-[28rem] max-w-[calc(100vw-6rem)] overflow-auto rounded-lg border border-surface-border bg-white p-3 shadow-lg";
-const panelSm = "absolute z-40 mt-1 w-72 rounded-lg border border-surface-border bg-white p-3 shadow-lg";
+// Popovers clamp to the viewport so they can't run off-page on narrow screens.
+const panel = "absolute z-40 mt-1 max-h-[70vh] w-[28rem] max-w-[calc(100vw-1.5rem)] overflow-auto rounded-lg border border-surface-border bg-white p-3 shadow-lg";
+const panelSm = "absolute z-40 mt-1 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg border border-surface-border bg-white p-3 shadow-lg";
 
 export function ViewToolbar({
   viewId,
@@ -145,7 +146,7 @@ export function ViewToolbar({
   const typeEditor = typeEditors[viewType];
 
   return (
-    <div ref={ref} className="relative flex items-center gap-2 py-2">
+    <div ref={ref} className="relative flex flex-wrap items-center gap-2 py-2">
       <button className={btn} onClick={() => setOpen(open === "filter" ? null : "filter")}>
         Filter{conds.length ? ` (${conds.length})` : ""}
       </button>

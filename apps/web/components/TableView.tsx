@@ -1,14 +1,15 @@
 "use client";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { loadMoreRecords } from "@/app/t/[tableId]/[viewId]/actions";
-import { deleteRecords } from "@/lib/client";
+import { deleteRecords, updateViewConfig } from "@/lib/client";
 import { EditableCell } from "./EditableCell";
 import { AddRowButton } from "./RecordActions";
 import { linkPrimaries as buildLinkPrimaries, linkTargets as buildLinkTargets, type Meta, type RecordEnvelope, type ViewMeta, visibleFields } from "@/lib/types";
 
-const FROZEN_W = 200; // fixed width for frozen columns so left offsets are computable
+const DEFAULT_W = 200; // default column width (also the frozen-offset unit)
+const MIN_W = 80; // resize floor
 const CHECKBOX_W = 40; // leading selection column
 
 /**
@@ -55,16 +56,72 @@ export function TableView({
   const freezeHeader = view.config.freezeHeader !== false; // default on
   const frozen = view.config.frozen ?? 1; // default: freeze the first (record-name) column
 
-  // Frozen data columns sit to the right of the always-frozen checkbox column.
-  const colStyle = (i: number): React.CSSProperties =>
-    i < frozen ? { position: "sticky", left: CHECKBOX_W + i * FROZEN_W, minWidth: FROZEN_W, width: FROZEN_W, maxWidth: FROZEN_W } : {};
+  // Column widths: saved per view in config.fields[].width; drag the header's
+  // right edge to resize (live local state, persisted on release).
+  const savedWidths = new Map((view.config.fields ?? []).filter((f) => f.width).map((f) => [f.fieldId, f.width!]));
+  const [widths, setWidths] = useState<Map<string, number>>(savedWidths);
+  useEffect(() => {
+    setWidths(new Map((view.config.fields ?? []).filter((f) => f.width).map((f) => [f.fieldId, f.width!])));
+  }, [view.config.fields]);
+  const widthOf = (fieldId: string) => widths.get(fieldId) ?? DEFAULT_W;
+  const drag = useRef<{ fieldId: string; startX: number; startW: number } | null>(null);
+
+  const onResizeStart = (fieldId: string, e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    drag.current = { fieldId, startX: e.clientX, startW: widthOf(fieldId) };
+    const move = (ev: PointerEvent) => {
+      const d = drag.current;
+      if (!d) return;
+      const w = Math.max(MIN_W, Math.round(d.startW + (ev.clientX - d.startX)));
+      setWidths((prev) => new Map(prev).set(d.fieldId, w));
+    };
+    const up = async (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const d = drag.current;
+      drag.current = null;
+      if (!d) return;
+      const w = Math.max(MIN_W, Math.round(d.startW + (ev.clientX - d.startX)));
+      // Persist: merge into the explicit field list (create one from the current
+      // visible order when the view doesn't pin fields yet).
+      const base = view.config.fields && view.config.fields.length
+        ? view.config.fields
+        : cols.map((f) => ({ fieldId: f.fieldId }));
+      const next = base.map((f) => (f.fieldId === d.fieldId ? { ...f, width: w } : f));
+      try {
+        await updateViewConfig(view.viewId, { ...view.config, fields: next });
+        router.refresh();
+      } catch (err) {
+        alert(`Resize save failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  // Frozen data columns sit to the right of the always-frozen checkbox column;
+  // their left offsets accumulate the actual widths of the frozen columns before them.
+  const frozenLeft = (i: number) => {
+    let left = CHECKBOX_W;
+    for (let j = 0; j < i; j++) left += widthOf(cols[j]!.fieldId);
+    return left;
+  };
+  const colStyle = (i: number): React.CSSProperties => {
+    const explicit = widths.get(cols[i]!.fieldId);
+    const w = explicit ?? DEFAULT_W;
+    // Frozen columns always need a fixed width (offsets depend on it); other
+    // columns stay auto-width until the user resizes them.
+    if (i < frozen) return { position: "sticky", left: frozenLeft(i), minWidth: w, width: w, maxWidth: w };
+    return explicit ? { minWidth: explicit, width: explicit, maxWidth: explicit } : {};
+  };
   const thStyle = (i: number): React.CSSProperties => ({
     ...(freezeHeader || i < frozen ? { position: "sticky" } : {}),
     ...(freezeHeader ? { top: 0 } : {}),
     ...colStyle(i),
     zIndex: freezeHeader && i < frozen ? 30 : freezeHeader ? 20 : i < frozen ? 10 : undefined,
   });
-  const tdStyle = (i: number): React.CSSProperties => (i < frozen ? { ...colStyle(i), zIndex: 10 } : {});
+  const tdStyle = (i: number): React.CSSProperties => (i < frozen ? { ...colStyle(i), zIndex: 10 } : colStyle(i));
   // The selection column is always frozen at the far left.
   const selStyle = (header: boolean): React.CSSProperties => ({
     position: "sticky",
@@ -143,10 +200,16 @@ export function TableView({
                 <th
                   key={f.fieldId}
                   style={thStyle(i)}
-                  className={`whitespace-nowrap border-b border-surface-border bg-surface-muted px-3 py-2 font-medium text-neutral-500 ${i < frozen ? "border-r" : ""}`}
+                  className={`group/th relative overflow-hidden whitespace-nowrap border-b border-surface-border bg-surface-muted px-3 py-2 text-ellipsis font-medium text-neutral-500 ${i < frozen ? "border-r" : ""}`}
                 >
                   {f.name}
                   {f.isComputed ? <span className="ml-1 text-[10px] text-neutral-400">ƒ</span> : null}
+                  {/* drag the right edge to resize; persists to the view config */}
+                  <span
+                    onPointerDown={(e) => onResizeStart(f.fieldId, e)}
+                    className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize touch-none border-r-2 border-transparent hover:border-blue-400 group-hover/th:border-surface-border"
+                    aria-hidden
+                  />
                 </th>
               ))}
             </tr>
@@ -200,7 +263,8 @@ export function TableView({
             )}
           </tbody>
         </table>
-        <div className="sticky left-0 flex items-center gap-3 border-t border-surface-border p-2">
+        {/* Safe-area padding keeps Add/Load-more clear of mobile browser chrome. */}
+        <div className="sticky left-0 flex items-center gap-3 border-t border-surface-border p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           <AddRowButton tableId={view.tableId} />
           {offset ? (
             <button
