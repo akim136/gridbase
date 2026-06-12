@@ -1,5 +1,7 @@
 "use client";
-import { DndContext, type DragEndEvent, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, type DragEndEvent, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -61,14 +63,58 @@ export function KanbanView({
     { id: UNSET, label: "Uncategorized" },
   ];
 
+  // Manual card order per column (sparse: listed ids first, rest natural).
+  // Local state is optimistic; persistence is fire-and-forget.
+  const [orderMap, setOrderMap] = useState<Record<string, string[]>>(view.config.kanban?.cardOrder ?? {});
+  useEffect(() => setOrderMap(view.config.kanban?.cardOrder ?? {}), [view.config.kanban?.cardOrder]);
+  const orderCards = (cards: RecordEnvelope[], columnId: string): RecordEnvelope[] => {
+    const order = orderMap[columnId];
+    if (!order?.length) return cards;
+    const byId = new Map(cards.map((c) => [c.id, c]));
+    const ranked = order.map((id) => byId.get(id)).filter((c): c is RecordEnvelope => Boolean(c));
+    const rankedIds = new Set(ranked.map((c) => c.id));
+    return [...ranked, ...cards.filter((c) => !rankedIds.has(c.id))];
+  };
+  function persistOrder(next: Record<string, string[]>) {
+    setOrderMap(next);
+    updateViewConfig(view.viewId, { ...view.config, kanban: { ...view.config.kanban!, cardOrder: next } }).catch((err) => {
+      setOrderMap(view.config.kanban?.cardOrder ?? {});
+      alert(`Reorder save failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }
+
   async function onDragEnd(e: DragEndEvent) {
     const recordId = String(e.active.id);
-    const target = e.over ? String(e.over.id) : null;
-    if (!target) return;
+    if (!e.over) return;
+    const overId = String(e.over.id);
     const rec = recs.find((r) => r.id === recordId);
-    if (!rec || bucketOf(rec) === target) return;
-    const newValue = target === UNSET ? null : target;
+    if (!rec || overId === recordId) return;
+
+    const fromCol = bucketOf(rec);
+    const overRec = recs.find((r) => r.id === overId);
+    const toCol = overRec ? bucketOf(overRec) : overId; // over a card → its column; else a column id
+
+    // Current visual order of the target column (ids).
+    const colIds = (col: string) => orderCards(recs.filter((r) => bucketOf(r) === col), col).map((r) => r.id);
+
+    if (toCol === fromCol) {
+      // Reorder within the column: move the card to the over-card's slot.
+      if (!overRec) return;
+      const ids = colIds(fromCol);
+      const from = ids.indexOf(recordId);
+      const to = ids.indexOf(overId);
+      if (from < 0 || to < 0 || from === to) return;
+      persistOrder({ ...orderMap, [fromCol]: arrayMove(ids, from, to) });
+      return;
+    }
+
+    // Cross-column: PATCH the stack value and slot the card into the target order.
+    const newValue = toCol === UNSET ? null : toCol;
+    const targetIds = colIds(toCol).filter((id) => id !== recordId);
+    const insertAt = overRec ? targetIds.indexOf(overId) : targetIds.length;
+    targetIds.splice(insertAt < 0 ? targetIds.length : insertAt, 0, recordId);
     setRecs((rs) => rs.map((r) => (r.id === recordId ? { ...r, fields: { ...r.fields, [stackId!]: newValue ?? undefined } } : r)));
+    persistOrder({ ...orderMap, [toCol]: targetIds, [fromCol]: (orderMap[fromCol] ?? []).filter((id) => id !== recordId) });
     try {
       await updateRecord(view.tableId, recordId, { [stackId!]: newValue });
     } catch (err) {
@@ -112,18 +158,21 @@ export function KanbanView({
               <CollapsedColumn key={col.id} id={col.id} label={col.label} count={cards.length} onExpand={() => setCollapsed(col.id, false)} />
             );
           }
+          const ordered = orderCards(cards, col.id);
           return (
             <Column key={col.id} id={col.id} label={col.label} count={cards.length} onCollapse={() => setCollapsed(col.id, true)} onAdd={() => addToColumn(col.id)}>
-              {cards.map((rec) => (
-                <Card
-                  key={rec.id}
-                  rec={rec}
-                  href={`/t/${view.tableId}/${view.viewId}/${rec.id}`}
-                  title={recordTitle(meta, view, rec)}
-                  previewFields={previewFields}
-                  labels={labels}
-                />
-              ))}
+              <SortableContext items={ordered.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+                {ordered.map((rec) => (
+                  <Card
+                    key={rec.id}
+                    rec={rec}
+                    href={`/t/${view.tableId}/${view.viewId}/${rec.id}`}
+                    title={recordTitle(meta, view, rec)}
+                    previewFields={previewFields}
+                    labels={labels}
+                  />
+                ))}
+              </SortableContext>
             </Column>
           );
         })}
@@ -170,8 +219,8 @@ function CollapsedColumn({ id, label, count, onExpand }: { id: string; label: st
 }
 
 function Card({ rec, href, title, previewFields, labels }: { rec: RecordEnvelope; href: string; title: string; previewFields: FieldMeta[]; labels: Map<string, string> }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: rec.id });
-  const style = transform ? { transform: `translate(${transform.x}px, ${transform.y}px)`, zIndex: 50 } : undefined;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: rec.id });
+  const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : undefined };
   return (
     <div
       ref={setNodeRef}

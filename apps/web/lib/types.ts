@@ -74,7 +74,18 @@ export interface ViewConfig {
   };
   sorts?: Array<{ fieldId: string; linkedFieldId?: string; direction?: "asc" | "desc" }>;
   groupBy?: string;
-  kanban?: { stackFieldId: string; maxPreviewFields?: number; columnOrder?: string[]; collapsedColumns?: string[] };
+  /** Table view: per-column footer aggregates, keyed by fieldId. */
+  summaries?: Record<string, "count" | "sum" | "avg" | "min" | "max">;
+  /** Table view: tint rows by this single-select field's value. */
+  colorBy?: string;
+  kanban?: {
+    stackFieldId: string;
+    maxPreviewFields?: number;
+    columnOrder?: string[];
+    collapsedColumns?: string[];
+    /** Sparse manual card order per column: listed ids first, rest in natural order. */
+    cardOrder?: Record<string, string[]>;
+  };
   calendar?: { dateFieldId: string };
   gallery?: { coverFieldId?: string; maxPreviewFields?: number };
   gantt?: { startFieldId: string; endFieldId?: string };
